@@ -82,12 +82,14 @@ enum DashboardTheme {
     .logo.all img{width:11px;height:11px;border-radius:3px;display:block}
 
     /* Tiles */
-    .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:12px;margin-bottom:24px}
+    .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(144px,100%),1fr));gap:12px;margin-bottom:24px}
     .tile{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:14px 16px}
     .tile .label{color:var(--text-secondary);font-size:12px;font-weight:600}
     .tile .value{font-size:28px;font-weight:650;margin-top:4px;letter-spacing:-.01em}
     .tile .note{color:var(--muted);font-size:12px;margin-top:2px}
     .tile.hero .value{font-size:44px}
+    /* Phones: the headline number takes a row, the other four pair up. */
+    @media (max-width:520px){.tile.hero{grid-column:1/-1}}
     .tile .value.alert{color:var(--critical)}
 
     /* Cards */
@@ -121,6 +123,10 @@ enum DashboardTheme {
 
     .empty{text-align:center;padding:36px 16px;color:var(--text-secondary);font-size:14px}
     svg{display:block;width:100%;height:auto}
+    /* Below ~560px the chart would shrink its labels past legibility, so it
+       keeps a minimum width and scrolls sideways inside its card instead. */
+    .chart{overflow-x:auto;-webkit-overflow-scrolling:touch}
+    .chart svg{min-width:560px}
     .axis{fill:var(--muted);font-size:11px}
     """
 }

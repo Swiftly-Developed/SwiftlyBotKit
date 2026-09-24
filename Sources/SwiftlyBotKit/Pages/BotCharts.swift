@@ -73,7 +73,9 @@ enum BotCharts {
                 cursor = y
             }
 
-            if index % labelStep == 0 || index == series.count - 1 {
+            // Counted back from the newest bucket, so the latest one is always
+            // labelled and no label is ever squeezed in beside another.
+            if (series.count - 1 - index) % labelStep == 0 {
                 let centre = x + barWidth / 2
                 svg += "<text class=\"axis\" x=\"\(fmt(centre))\" y=\"\(fmt(baseline + 16))\" text-anchor=\"middle\">\(escape(range.axisLabel(for: point.bucket, in: timeZone)))</text>"
             }

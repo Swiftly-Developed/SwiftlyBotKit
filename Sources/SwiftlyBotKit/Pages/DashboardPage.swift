@@ -18,14 +18,15 @@ enum DashboardPage {
         options: BotKitConfiguration.Dashboard = .default,
         knownAgentCount: Int = AIAgentCatalog.all.count
     ) -> String {
-        let siteName = selectedSite?.name ?? "All sites"
+        // A single-site app has nothing to switch between, so it names no site.
+        let siteName: String? = sites.count > 1 ? (selectedSite?.name ?? "All sites") : nil
         let base = options.basePath
         let page = html(.lang("en")) {
             head {
                 meta(.charset(.utf8))
                 meta(.name(.viewport), .content("width=device-width, initial-scale=1"))
                 meta(.name("robots"), .content("noindex, nofollow"))
-                Elementary.title { "\(options.title) \u{00B7} \(siteName)" }
+                Elementary.title { [options.title, siteName].compactMap { $0 }.joined(separator: " \u{00B7} ") }
                 style { HTMLRaw(DashboardTheme.css) }
             }
             body {
@@ -58,7 +59,7 @@ enum DashboardPage {
         title: String,
         base: String,
         range: BotDateRange,
-        siteName: String,
+        siteName: String?,
         generatedAt: Date,
         timeZone: TimeZone
     ) -> some HTML {
@@ -66,7 +67,9 @@ enum DashboardPage {
             div {
                 h1 { title }
                 p(.class("sub")) {
-                    "\(siteName) \u{00B7} \(range.label) \u{00B7} generated \(timestamp(generatedAt, timeZone: timeZone))"
+                    [siteName, range.label, "generated \(timestamp(generatedAt, timeZone: timeZone))"]
+                        .compactMap { $0 }
+                        .joined(separator: " \u{00B7} ")
                 }
             }
             form(.method(.post), .action("\(base)/logout")) {
@@ -228,7 +231,9 @@ enum DashboardPage {
             p(.class("hint")) {
                 "Stacked by what the agent was doing. \(range.isHourly ? "Hourly" : "Daily") buckets, \(timeZone.identifier)."
             }
-            HTMLRaw(BotCharts.stackedColumns(series: data.series, range: range, timeZone: timeZone))
+            div(.class("chart")) {
+                HTMLRaw(BotCharts.stackedColumns(series: data.series, range: range, timeZone: timeZone))
+            }
             div(.class("legend")) {
                 for entry in data.purposeTotals {
                     div {
@@ -303,7 +308,7 @@ enum DashboardPage {
         div(.class("card")) {
             h2 { "Visitors from AI assistants" }
             p(.class("hint")) {
-                "Humans who clicked through from an AI answer. Analytics largely misses these: it is consent-gated, and many never accept."
+                "Humans who clicked through from an AI answer. Client-side analytics often miss these, for example when they wait for cookie consent."
             }
             if referrals.isEmpty {
                 p(.class("hint")) { "No AI referrals in this window." }
@@ -329,7 +334,7 @@ enum DashboardPage {
 
     private static func footnote(knownAgentCount: Int) -> some HTML {
         p(.class("sub")) {
-            "\(knownAgentCount) known agents. \u{201C}Verified\u{201D} means the source IP fell inside the range list its operator publishes. OpenAI publishes one per agent, Anthropic one list for all three Claude agents, and everyone else publishes nothing we can check, so those stay unverified rather than counting against the rate."
+            "\(knownAgentCount) known agents. \u{201C}Verified\u{201D} means the source IP fell inside the range list its operator publishes. OpenAI and Perplexity publish one list per agent and Anthropic one list for all its Claude agents. Agents whose operator publishes no list stay unverified rather than counting against the rate."
         }
     }
 

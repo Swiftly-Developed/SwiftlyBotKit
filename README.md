@@ -10,6 +10,11 @@ someone asked an assistant a question) and whether its IP address really
 belongs to the operator it claims. Visitors who arrive from ChatGPT, Claude,
 Perplexity and other assistants are recorded too.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/dashboard-dark.png">
+  <img alt="The SwiftlyBotKit dashboard: headline tiles for AI agent visits, user-triggered visits, verified share, spoofed requests and AI referrals, above a daily chart of visits stacked by purpose." src=".github/assets/dashboard-light.png">
+</picture>
+
 ## Why
 
 AI bot trackers exist for WordPress, Next.js and Cloudflare. There was nothing
@@ -46,6 +51,26 @@ breakdown is what this package records and shows.
   24 hours, 7, 30 or 90 days.
 - Custom agents and referrer hosts can be added, and built-in ones
   reclassified, through configuration.
+
+## The dashboard
+
+Server-rendered HTML and inline SVG: no JavaScript, no CDN, and it follows the
+system light or dark setting. Below the headline tiles and the chart, it
+breaks traffic down by agent (with how much of it was verified), by page (with
+the user-triggered share), and by AI assistant for human referrals.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/breakdowns-dark.png">
+  <img alt="Dashboard breakdowns: top agents with operator, verified count and a robots.txt flag; most-read pages split into user-triggered and crawled; visitors from AI assistants." src=".github/assets/breakdowns-light.png">
+</picture>
+
+On a phone the tiles pair up and the chart scrolls sideways rather than
+shrinking its labels:
+
+<img alt="The dashboard at phone width." src=".github/assets/mobile-light.png" width="320">
+
+Screenshots are from [`Examples/QuickStart`](Examples/QuickStart) with sample
+data.
 
 ## Requirements
 
