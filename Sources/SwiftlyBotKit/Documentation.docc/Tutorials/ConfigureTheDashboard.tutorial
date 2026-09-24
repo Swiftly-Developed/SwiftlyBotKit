@@ -1,0 +1,109 @@
+@Tutorial(time: 20) {
+    @Intro(title: "Configure the dashboard") {
+        Mount the dashboard at your own path, protect it with your own credentials and secret, make its days start at your midnight, and give a multi-site app a site switcher.
+
+        This tutorial builds on <doc:AddSwiftlyBotKitToAVaporApp>. All options live on ``BotKitConfiguration``.
+    }
+
+    @Section(title: "Credentials and the signing secret") {
+        @ContentAndMedia {
+            The dashboard is only mounted when both a username and a password resolve to non-empty values. Until then, its path answers 404 and recording carries on regardless.
+        }
+
+        @Steps {
+            @Step {
+                Move the configuration into its own function and pass it to ``BotKit/install(on:config:)``. A fresh ``BotKitConfiguration`` holds every default.
+
+                @Code(name: "configure.swift", file: dash-01-configure.swift)
+            }
+
+            @Step {
+                By default, credentials come from `BOT_DASHBOARD_USER` and `BOT_DASHBOARD_PASSWORD`, and the signing secret from `BOT_DASHBOARD_SECRET`. To use your own variable names, set them as ``BotKitConfigValue/environment(_:)`` values.
+
+                The signing secret keys the session cookie and the hash that stands in for each client IP. Without one, a random key is used per process: every restart signs everyone out, and IP hashes stop matching earlier rows.
+
+                @Code(name: "configure.swift", file: dash-02-configure.swift)
+            }
+        }
+    }
+
+    @Section(title: "Path, title and time zone") {
+        @ContentAndMedia {
+            The dashboard draws every hourly and daily bucket in one time zone, on both the Swift side and the SQL side of its queries. The default is UTC.
+        }
+
+        @Steps {
+            @Step {
+                Set ``BotKitConfiguration/Dashboard/path``, ``BotKitConfiguration/Dashboard/title`` and ``BotKitConfiguration/Dashboard/timeZone``.
+
+                Keep the path under something your `robots.txt` disallows. Pick the time zone from ``BotKitTimeZone``, which has one case per IANA zone.
+
+                @Code(name: "configure.swift", file: dash-03-configure.swift)
+            }
+        }
+    }
+
+    @Section(title: "Date ranges and sessions") {
+        @ContentAndMedia {
+            The date filter offers presets from ``BotDateRange``: 24 hours in hourly buckets, then 7, 30 and 90 days in daily buckets.
+        }
+
+        @Steps {
+            @Step {
+                Choose which presets appear, in order, and which one opens by default.
+
+                @Code(name: "configure.swift", file: dash-04-configure.swift)
+            }
+
+            @Step {
+                Shorten the session and tighten the failed sign-in throttle. The throttle is in memory and per process, keyed on a hash of the client IP.
+
+                @Code(name: "configure.swift", file: dash-05-configure.swift)
+            }
+        }
+    }
+
+    @Section(title: "More than one site") {
+        @ContentAndMedia {
+            One app can serve several domains. Every recorded row carries a site key, and the dashboard can filter by it.
+        }
+
+        @Steps {
+            @Step {
+                Give ``BotKitConfiguration/siteKey`` a closure that returns the site a request belongs to. In a real app, reuse whatever your own host-based routing already decides, so the dashboard splits traffic exactly the way your router does.
+
+                @Code(name: "configure.swift", file: dash-06-configure.swift)
+            }
+
+            @Step {
+                List the sites in ``BotKitConfiguration/sites``. The keys must match what `siteKey` returns. A logo must resolve on every host the dashboard is opened on, so a root-relative path served by `FileMiddleware` is the simplest choice.
+
+                The switcher only appears with two or more sites. With no `?site=` in the URL, the dashboard opens on the site of the domain you opened it on.
+
+                @Code(name: "configure.swift", file: dash-07-configure.swift)
+            }
+        }
+    }
+
+    @Section(title: "Sign in") {
+        @ContentAndMedia {
+            Set the variables the configuration reads, then sign in.
+        }
+
+        @Steps {
+            @Step {
+                Export the credentials and a long random secret, then run the app. The two warnings from the first tutorial are gone.
+
+                @Code(name: "Terminal", file: dash-08-terminal.sh)
+            }
+
+            @Step {
+                Sign in by posting `username` and `password` as a form to the `login` endpoint under the dashboard path, then open the dashboard with `site` and `range` in the query. A browser does the same through the sign-in page.
+
+                `?site=all` shows every site. `range` takes the raw values of ``BotDateRange``: `24h`, `7d`, `30d` and `90d`.
+
+                @Code(name: "Terminal", file: dash-09-terminal.sh)
+            }
+        }
+    }
+}

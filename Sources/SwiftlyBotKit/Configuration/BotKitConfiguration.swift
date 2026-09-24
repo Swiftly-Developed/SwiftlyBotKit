@@ -1,0 +1,557 @@
+import Foundation
+import Vapor
+import Fluent
+
+/// Everything `BotKit` can be told about the app it is installed in.
+///
+/// Every property has a default, so the smallest useful setup is
+/// `BotKitConfiguration()`: one site, recording on, IP verification on, and a
+/// dashboard at `/admin/ai-bots/` that is mounted once `BOT_DASHBOARD_USER` and
+/// `BOT_DASHBOARD_PASSWORD` are set in the environment.
+///
+/// The options are grouped into small nested structs (`recording`,
+/// `detection`, `verification`, `dashboard`) plus the client IP strategy, each
+/// with a `default` value you can copy and adjust:
+///
+/// ```swift
+/// var config = BotKitConfiguration()
+/// config.dashboard.path = "/internal/bots"
+/// config.dashboard.timeZone = .americaNewYork
+/// config.clientIP = .forwardedFor(trustedProxies: 2)
+/// try BotKit.configureRoutes(for: app, config: config)
+/// ```
+public struct BotKitConfiguration: Sendable {
+
+    /// The site key used when the app does not supply its own `siteKey`.
+    public static let defaultSiteKey = "default"
+
+    /// Which site a request belongs to, stored on every recorded row as
+    /// `site_key`.
+    ///
+    /// A multi-site app should return the same key its own host-based routing
+    /// uses, so the dashboard's site filter splits traffic the way the router
+    /// does. A single-site app can leave the default, which files everything
+    /// under ``defaultSiteKey``.
+    public var siteKey: @Sendable (Request) -> String
+
+    /// The sites the dashboard's switcher offers. Keys must match what
+    /// ``siteKey`` returns.
+    ///
+    /// Leave empty for a single-site app: the switcher is only shown when there
+    /// are at least two sites to choose between.
+    public var sites: [BotDashboardSite]
+
+    /// The HMAC key behind dashboard session cookies and the keyed hash that
+    /// stands in for client IP addresses.
+    ///
+    /// Defaults to the `BOT_DASHBOARD_SECRET` environment variable. When it
+    /// resolves to nothing, a random per-process key is used and a warning is
+    /// logged: sessions then end at every restart, and IP hashes stop matching
+    /// rows written by earlier processes.
+    public var signingSecret: BotKitConfigValue?
+
+    /// What gets recorded.
+    public var recording: Recording
+
+    /// How requests are recognised as AI agents or AI-assistant referrals.
+    public var detection: Detection
+
+    /// Whether and how claimed agents are checked against their operators'
+    /// published IP ranges.
+    public var verification: Verification
+
+    /// How the client's IP address is read from a request. Used for IP
+    /// verification, for the stored IP hash, and to key the login limiter.
+    public var clientIP: ClientIPStrategy
+
+    /// The password-protected dashboard.
+    public var dashboard: Dashboard
+
+    /// Which of the app's databases the table lives in, recording writes to
+    /// and the dashboard reads from. Default `nil`: the app's default
+    /// database, so the table sits beside the app's own tables and no
+    /// separate database is needed. Set it when the app registers several
+    /// databases and BotKit should use a non-default one; it must be
+    /// PostgreSQL either way.
+    public var database: DatabaseID?
+
+    /// Creates a configuration. Every parameter has a default; see each
+    /// property for what it controls.
+    public init(
+        siteKey: @escaping @Sendable (Request) -> String = { _ in BotKitConfiguration.defaultSiteKey },
+        sites: [BotDashboardSite] = [],
+        signingSecret: BotKitConfigValue? = .environment("BOT_DASHBOARD_SECRET"),
+        recording: Recording = .default,
+        detection: Detection = .default,
+        verification: Verification = .default,
+        clientIP: ClientIPStrategy = .lastForwardedFor,
+        dashboard: Dashboard = .default,
+        database: DatabaseID? = nil
+    ) {
+        self.siteKey = siteKey
+        self.sites = sites
+        self.signingSecret = signingSecret
+        self.recording = recording
+        self.detection = detection
+        self.verification = verification
+        self.clientIP = clientIP
+        self.dashboard = dashboard
+        self.database = database
+    }
+
+    /// The site for a `?site=` value, or `nil` for the all-sites view.
+    ///
+    /// With no `?site=` at all, the dashboard opens on the site whose domain it
+    /// was opened on. "All sites" is an explicit `?site=all`, which every
+    /// switcher link and range pill carries, so choosing it sticks.
+    func site(forKey key: String?, hostSiteKey: String) -> BotDashboardSite? {
+        let key = key ?? hostSiteKey
+        guard key != "all" else { return nil }
+        return sites.first { $0.key == key }
+    }
+}
+
+// MARK: - Recording
+
+extension BotKitConfiguration {
+
+    /// Which requests are recorded.
+    public struct Recording: Sendable, Equatable {
+
+        /// Static assets a crawler pulls alongside a page. `.txt` and `.xml`
+        /// are deliberately absent: a crawler fetching `robots.txt` or
+        /// `sitemap.xml` is a real signal.
+        public static let defaultIgnoredFileExtensions: Set<String> = [
+            "png", "jpg", "jpeg", "gif", "svg", "webp", "avif", "ico",
+            "css", "js", "mjs", "map", "woff", "woff2", "ttf", "otf",
+            "mp4", "mov", "webm", "pdf", "zip",
+        ]
+
+        /// Records AI agents, records AI-assistant referrals, skips static
+        /// assets and the dashboard's own paths.
+        public static let `default` = Recording()
+
+        /// Record requests whose user agent matches a known AI agent.
+        /// Default `true`.
+        public var recordsAgents: Bool
+
+        /// Record humans arriving from an AI assistant (a `Referer` on a known
+        /// assistant host). Default `true`.
+        public var recordsReferrals: Bool
+
+        /// Lowercased file extensions (without the dot) that are never
+        /// recorded. Recording assets would multiply every page view by its
+        /// image count and say nothing new. Default
+        /// ``defaultIgnoredFileExtensions``.
+        public var ignoredFileExtensions: Set<String>
+
+        /// Path prefixes that are never recorded, such as `/healthz` or an
+        /// internal API. The dashboard's own path is always excluded on top of
+        /// these. Default empty.
+        public var excludedPathPrefixes: [String]
+
+        /// `true` when at least one kind of traffic is recorded. When `false`,
+        /// the tracking middleware is not installed at all.
+        public var isEnabled: Bool { recordsAgents || recordsReferrals }
+
+        /// Creates a recording configuration.
+        public init(
+            recordsAgents: Bool = true,
+            recordsReferrals: Bool = true,
+            ignoredFileExtensions: Set<String> = Recording.defaultIgnoredFileExtensions,
+            excludedPathPrefixes: [String] = []
+        ) {
+            self.recordsAgents = recordsAgents
+            self.recordsReferrals = recordsReferrals
+            self.ignoredFileExtensions = ignoredFileExtensions
+            self.excludedPathPrefixes = excludedPathPrefixes
+        }
+    }
+}
+
+// MARK: - Detection
+
+extension BotKitConfiguration {
+
+    /// The agent catalog and AI-assistant referrer list requests are matched
+    /// against.
+    public struct Detection: Sendable, Equatable {
+
+        /// The built-in catalog and referrer list, with nothing added.
+        public static let `default` = Detection()
+
+        /// Match against the generated ``AIAgentCatalog``. Default `true`.
+        public var includesBuiltInAgents: Bool
+
+        /// Agents to recognise in addition to the built-in catalog. An entry
+        /// whose token equals a built-in token (case-insensitively) replaces
+        /// the built-in entry, which is how to reclassify an agent. Default
+        /// empty.
+        public var customAgents: [AIAgent]
+
+        /// Match referrers against ``LLMReferrer/builtInPlatforms``. Default
+        /// `true`.
+        public var includesBuiltInReferrers: Bool
+
+        /// Assistant hosts to recognise in addition to the built-in list. An
+        /// entry with the same host suffix as a built-in one replaces it.
+        /// Default empty.
+        public var customReferrers: [LLMReferrer.Platform]
+
+        /// Creates a detection configuration.
+        public init(
+            includesBuiltInAgents: Bool = true,
+            customAgents: [AIAgent] = [],
+            includesBuiltInReferrers: Bool = true,
+            customReferrers: [LLMReferrer.Platform] = []
+        ) {
+            self.includesBuiltInAgents = includesBuiltInAgents
+            self.customAgents = customAgents
+            self.includesBuiltInReferrers = includesBuiltInReferrers
+            self.customReferrers = customReferrers
+        }
+    }
+}
+
+// MARK: - Verification
+
+extension BotKitConfiguration {
+
+    /// Checking claimed agents against the IP ranges their operators publish.
+    public struct Verification: Sendable, Equatable {
+
+        /// Verification on, against ``CrawlerRangeFeed/defaults``, refreshed
+        /// every twelve hours.
+        public static let `default` = Verification()
+
+        /// When `false`, no feed is ever fetched and every agent visit is
+        /// stored as ``BotVerification/unverified``. Default `true`.
+        public var isEnabled: Bool
+
+        /// The published range feeds and the agents each one covers. Default
+        /// ``CrawlerRangeFeed/defaults``.
+        public var feeds: [CrawlerRangeFeed]
+
+        /// How long fetched ranges are trusted before a background refresh.
+        /// Requests never wait on a refresh once ranges are cached. Default
+        /// twelve hours.
+        public var refreshInterval: TimeInterval
+
+        /// Creates a verification configuration.
+        public init(
+            isEnabled: Bool = true,
+            feeds: [CrawlerRangeFeed] = CrawlerRangeFeed.defaults,
+            refreshInterval: TimeInterval = 12 * 60 * 60
+        ) {
+            self.isEnabled = isEnabled
+            self.feeds = feeds
+            self.refreshInterval = refreshInterval
+        }
+    }
+}
+
+/// One published IP range feed and the agents it vouches for.
+///
+/// Feeds use the JSON shape the major operators share:
+/// `{"prefixes": [{"ipv4Prefix": "…"}, {"ipv6Prefix": "…"}]}`. The body is
+/// decoded whatever `Content-Type` it is served with.
+public struct CrawlerRangeFeed: Sendable, Equatable {
+
+    /// The feeds of OpenAI, Anthropic and Perplexity.
+    ///
+    /// OpenAI publishes a separate list per agent. Anthropic publishes one list
+    /// for all three Claude agents, so a verified Claude hit proves "genuinely
+    /// Anthropic" and the user agent says which of the three it was.
+    public static let defaults: [CrawlerRangeFeed] = [
+        .init(url: "https://openai.com/gptbot.json", agentTokens: ["GPTBot"]),
+        .init(url: "https://openai.com/searchbot.json", agentTokens: ["OAI-SearchBot"]),
+        .init(url: "https://openai.com/chatgpt-user.json", agentTokens: ["ChatGPT-User"]),
+        .init(url: "https://claude.com/crawling/bots.json",
+              agentTokens: ["ClaudeBot", "Claude-User", "Claude-SearchBot"]),
+        .init(url: "https://www.perplexity.ai/perplexitybot.json", agentTokens: ["PerplexityBot"]),
+        .init(url: "https://www.perplexity.ai/perplexity-user.json", agentTokens: ["Perplexity-User"]),
+    ]
+
+    /// The feed's absolute URL.
+    public var url: String
+
+    /// The agent tokens (as in ``AIAgent/token``) whose claims this feed can
+    /// confirm. Compared case-insensitively.
+    public var agentTokens: [String]
+
+    /// Creates a feed entry.
+    public init(url: String, agentTokens: [String]) {
+        self.url = url
+        self.agentTokens = agentTokens
+    }
+}
+
+// MARK: - Client IP
+
+/// Where the client's IP address comes from.
+///
+/// This matters for security, not just accuracy: IP verification is only as
+/// honest as the address it checks. `X-Forwarded-For` is a list that each proxy
+/// appends to, so its leftmost entry is whatever the client chose to send.
+/// Trusting it would let any spoofer claim an operator's address and earn a
+/// `verified` badge.
+public enum ClientIPStrategy: Sendable {
+
+    /// The last `X-Forwarded-For` entry, falling back to the socket's remote
+    /// address when the header is absent. Right for exactly one trusted
+    /// reverse proxy or load balancer that appends the address it saw (Heroku,
+    /// most PaaS routers, a single nginx). The default.
+    case lastForwardedFor
+
+    /// The entry `trustedProxies` positions from the right of
+    /// `X-Forwarded-For`, for a chain of that many appending proxies (a CDN in
+    /// front of a load balancer is two). `1` is the same as
+    /// ``lastForwardedFor``. When the header has fewer entries, its first
+    /// entry is used, since every proxy present wrote one; when it is absent,
+    /// or `trustedProxies` is below 1, the socket's remote address is used.
+    case forwardedFor(trustedProxies: Int)
+
+    /// The socket's remote address only, ignoring `X-Forwarded-For`. Right when
+    /// the app faces the internet directly.
+    case remoteAddress
+
+    /// Your own extraction, for a proxy that uses another header such as
+    /// `CF-Connecting-IP` or `Fly-Client-IP`. Return `nil` when unknown.
+    case custom(@Sendable (Request) -> String?)
+
+    /// The client IP for `request` under this strategy.
+    public func clientIP(for request: Request) -> String? {
+        switch self {
+        case .lastForwardedFor:
+            return Self.forwardedEntry(in: request.headers, fromRight: 1)
+                ?? request.remoteAddress?.ipAddress
+        case .forwardedFor(let trustedProxies):
+            guard trustedProxies >= 1 else { return request.remoteAddress?.ipAddress }
+            return Self.forwardedEntry(in: request.headers, fromRight: trustedProxies)
+                ?? request.remoteAddress?.ipAddress
+        case .remoteAddress:
+            return request.remoteAddress?.ipAddress
+        case .custom(let extract):
+            return extract(request)
+        }
+    }
+
+    /// The `position`-th `X-Forwarded-For` entry counting from the right
+    /// (1-based), or the first entry when there are fewer.
+    static func forwardedEntry(in headers: HTTPHeaders, fromRight position: Int) -> String? {
+        let entries = headers[.xForwardedFor]
+            .flatMap { $0.split(separator: ",") }
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard !entries.isEmpty else { return nil }
+        let index = max(entries.count - position, 0)
+        return entries[index]
+    }
+}
+
+// MARK: - Dashboard
+
+extension BotKitConfiguration {
+
+    /// The password-protected dashboard.
+    public struct Dashboard: Sendable, Equatable {
+
+        /// Mounted at `/admin/ai-bots`, credentials from `BOT_DASHBOARD_USER`
+        /// and `BOT_DASHBOARD_PASSWORD`, buckets in UTC.
+        public static let `default` = Dashboard()
+
+        /// Set to `false` to never mount the dashboard, even with credentials
+        /// configured. Recording is unaffected. Default `true`.
+        public var isEnabled: Bool
+
+        /// Where the dashboard is mounted, e.g. `/admin/ai-bots`. The sign-in
+        /// and sign-out endpoints sit below it. Keep it under a path your
+        /// `robots.txt` disallows. Default `/admin/ai-bots`.
+        public var path: String
+
+        /// The sign-in username. Default `.environment("BOT_DASHBOARD_USER")`.
+        /// The dashboard is only mounted when both this and ``password``
+        /// resolve to non-empty values.
+        public var username: BotKitConfigValue?
+
+        /// The sign-in password. Default
+        /// `.environment("BOT_DASHBOARD_PASSWORD")`.
+        public var password: BotKitConfigValue?
+
+        /// The heading and page title. Default `AI bot traffic`.
+        public var title: String
+
+        /// The time zone every hourly and daily bucket boundary is drawn in,
+        /// on both the Swift and the SQL side of the query, for example
+        /// `.americaNewYork` or `.europeParis`. Default ``BotKitTimeZone/utc``.
+        public var timeZone: BotKitTimeZone
+
+        /// The date ranges offered as filter pills, in display order. Default
+        /// every ``BotDateRange`` case.
+        public var dateRanges: [BotDateRange]
+
+        /// The range shown when the URL names none (or an unoffered one).
+        /// Default ``BotDateRange/week``.
+        public var defaultDateRange: BotDateRange
+
+        /// The session cookie's name. Default `botkit_dashboard`.
+        public var sessionCookieName: String
+
+        /// How long a sign-in lasts. Default twelve hours.
+        public var sessionLifetime: TimeInterval
+
+        /// When the session cookie is marked `Secure`. Default
+        /// ``SecureCookiePolicy/automatic``.
+        public var secureCookies: SecureCookiePolicy
+
+        /// Failed sign-in throttling. Default five failures per client per
+        /// fifteen minutes.
+        public var loginLimit: LoginLimit
+
+        /// Creates a dashboard configuration.
+        public init(
+            isEnabled: Bool = true,
+            path: String = "/admin/ai-bots",
+            username: BotKitConfigValue? = .environment("BOT_DASHBOARD_USER"),
+            password: BotKitConfigValue? = .environment("BOT_DASHBOARD_PASSWORD"),
+            title: String = "AI bot traffic",
+            timeZone: BotKitTimeZone = .utc,
+            dateRanges: [BotDateRange] = BotDateRange.allCases,
+            defaultDateRange: BotDateRange = .week,
+            sessionCookieName: String = "botkit_dashboard",
+            sessionLifetime: TimeInterval = 12 * 60 * 60,
+            secureCookies: SecureCookiePolicy = .automatic,
+            loginLimit: LoginLimit = .default
+        ) {
+            self.isEnabled = isEnabled
+            self.path = path
+            self.username = username
+            self.password = password
+            self.title = title
+            self.timeZone = timeZone
+            self.dateRanges = dateRanges
+            self.defaultDateRange = defaultDateRange
+            self.sessionCookieName = sessionCookieName
+            self.sessionLifetime = sessionLifetime
+            self.secureCookies = secureCookies
+            self.loginLimit = loginLimit
+        }
+
+        /// ``path`` with exactly one leading slash and no trailing slash.
+        public var normalizedPath: String {
+            "/" + pathComponents.joined(separator: "/")
+        }
+
+        /// The prefix links are built on: ``normalizedPath``, or empty when
+        /// the dashboard is mounted at the root, so links never start `//`.
+        var basePath: String {
+            pathComponents.isEmpty ? "" : normalizedPath
+        }
+
+        /// ``path`` split into its non-empty components.
+        var pathComponents: [String] {
+            path.split(separator: "/").map(String.init)
+        }
+
+        /// ``dateRanges``, or ``defaultDateRange`` alone when that is empty, so
+        /// there is always at least one pill.
+        var offeredDateRanges: [BotDateRange] {
+            dateRanges.isEmpty ? [defaultDateRange] : dateRanges
+        }
+
+        /// The range for a `?range=` value.
+        func dateRange(forQuery raw: String?) -> BotDateRange {
+            let offered = offeredDateRanges
+            if let raw, let range = BotDateRange(rawValue: raw), offered.contains(range) {
+                return range
+            }
+            return offered.contains(defaultDateRange) ? defaultDateRange : offered[0]
+        }
+    }
+
+    /// Failed sign-in throttling, in memory and per process.
+    public struct LoginLimit: Sendable, Equatable {
+
+        /// Five failures per fifteen minutes.
+        public static let `default` = LoginLimit()
+
+        /// Failures allowed within ``window`` before further attempts are
+        /// refused. Default `5`.
+        public var maximumFailures: Int
+
+        /// The sliding window failures are counted over. Default fifteen
+        /// minutes.
+        public var window: TimeInterval
+
+        /// Creates a login limit.
+        public init(maximumFailures: Int = 5, window: TimeInterval = 15 * 60) {
+            self.maximumFailures = maximumFailures
+            self.window = window
+        }
+    }
+
+    /// When the dashboard's session cookie carries the `Secure` attribute.
+    public enum SecureCookiePolicy: Sendable, Equatable {
+        /// Secure when the request arrived over HTTPS, judged by
+        /// `X-Forwarded-Proto: https` (for TLS terminated at a proxy) or by
+        /// the request URL's scheme.
+        case automatic
+        /// Always secure.
+        case always
+        /// Never secure. Only for local development over plain HTTP.
+        case never
+    }
+}
+
+// MARK: - Values
+
+/// A string setting that is either given directly or read from an environment
+/// variable when the dashboard is configured.
+///
+/// A string literal is a direct value, so `username: "owner"` works. An empty
+/// value, or an unset variable, counts as not configured.
+public enum BotKitConfigValue: Sendable, Equatable, ExpressibleByStringLiteral {
+    /// Read from this environment variable when `BotKit.configureRoutes(for:config:)` runs, not when the configuration is built.
+    case environment(String)
+    /// This exact value.
+    case value(String)
+
+    /// Creates a direct value from a string literal.
+    public init(stringLiteral value: String) {
+        self = .value(value)
+    }
+
+    /// The configured value, or `nil` when it is empty or the variable is
+    /// unset.
+    public func resolve() -> String? {
+        let raw: String?
+        switch self {
+        case .environment(let key): raw = Environment.get(key)
+        case .value(let value): raw = value
+        }
+        guard let raw, !raw.isEmpty else { return nil }
+        return raw
+    }
+}
+
+// MARK: - Sites
+
+/// One site the dashboard can filter to.
+public struct BotDashboardSite: Sendable, Equatable {
+    /// Matches what ``BotKitConfiguration/siteKey`` returns for this site's
+    /// requests, and the stored `site_key` column.
+    public let key: String
+    /// Shown in the switcher, e.g. "Marketing site".
+    public let name: String
+    /// A small square logo shown beside the name in the switcher, as a URL or
+    /// root-relative path. It must resolve on every host the dashboard is
+    /// opened on, so a path served by `FileMiddleware` works well.
+    public let logoPath: String?
+
+    /// Creates a site entry.
+    public init(key: String, name: String, logoPath: String? = nil) {
+        self.key = key
+        self.name = name
+        self.logoPath = logoPath
+    }
+}

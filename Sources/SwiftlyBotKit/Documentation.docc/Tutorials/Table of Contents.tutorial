@@ -1,0 +1,31 @@
+@Tutorials(name: "Meet SwiftlyBotKit") {
+    @Intro(title: "Meet SwiftlyBotKit") {
+        See which AI agents read your Vapor app, what they were doing when they read it, and whether they really were who they claimed to be.
+
+        These tutorials take you from an empty dependency list to a working dashboard, then through the options that matter once real traffic arrives: which proxy to trust for the client IP, what not to record, and how to teach the kit about agents and assistants it does not know yet.
+    }
+
+    @Chapter(name: "Getting started") {
+        Add the package, give it a PostgreSQL database, and record your first AI agent visit.
+
+        @Image(source: chapter-getting-started.png, alt: "Three rising bars.")
+
+        @TutorialReference(tutorial: "doc:AddSwiftlyBotKitToAVaporApp")
+    }
+
+    @Chapter(name: "The dashboard") {
+        Put the dashboard where you want it, secure it, and make it read in your own time zone and across all of your sites.
+
+        @Image(source: chapter-dashboard.png, alt: "Three bars of a dashboard chart.")
+
+        @TutorialReference(tutorial: "doc:ConfigureTheDashboard")
+    }
+
+    @Chapter(name: "Recording and detection") {
+        Adjust what is recorded and how it is classified to fit your hosting and your audience.
+
+        @Image(source: chapter-recording.png, alt: "Three bars of varying height.")
+
+        @TutorialReference(tutorial: "doc:TuneRecordingAndDetection")
+    }
+}

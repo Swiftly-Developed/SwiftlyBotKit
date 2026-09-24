@@ -1,0 +1,24 @@
+# SwiftPM
+.build/
+.swiftpm/
+Packages/
+Package.resolved
+Examples/*/.build/
+Examples/*/.swiftpm/
+Examples/*/Package.resolved
+
+# Xcode
+xcuserdata/
+DerivedData/
+*.xcodeproj/
+*.xcworkspace/
+
+# DocC output
+*.doccarchive/
+
+# Local environment
+.env
+.env.*
+
+# macOS
+.DS_Store

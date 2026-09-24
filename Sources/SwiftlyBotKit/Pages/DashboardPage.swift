@@ -1,0 +1,353 @@
+import Foundation
+import Elementary
+
+/// The dashboard page, at `BotKitConfiguration.Dashboard.path`.
+///
+/// Self-contained on purpose: no Tailwind CDN, no shared site layout, no
+/// JavaScript. It is an owner-facing page behind a password, so it should
+/// render identically whether or not a CDN is reachable, and it must never pull
+/// the public sites' consent or analytics chrome into an admin view.
+enum DashboardPage {
+
+    static func render(
+        data: BotDashboardData,
+        range: BotDateRange,
+        sites: [BotDashboardSite],
+        selectedSite: BotDashboardSite?,
+        generatedAt: Date,
+        options: BotKitConfiguration.Dashboard = .default,
+        knownAgentCount: Int = AIAgentCatalog.all.count
+    ) -> String {
+        let siteName = selectedSite?.name ?? "All sites"
+        let base = options.basePath
+        let page = html(.lang("en")) {
+            head {
+                meta(.charset(.utf8))
+                meta(.name(.viewport), .content("width=device-width, initial-scale=1"))
+                meta(.name("robots"), .content("noindex, nofollow"))
+                Elementary.title { "\(options.title) \u{00B7} \(siteName)" }
+                style { HTMLRaw(DashboardTheme.css) }
+            }
+            body {
+                main {
+                    header(title: options.title, base: base, range: range, siteName: siteName,
+                           generatedAt: generatedAt, timeZone: options.timeZone.foundationTimeZone)
+                    filters(base: base, range: range, ranges: options.offeredDateRanges,
+                            sites: sites, selectedSite: selectedSite)
+                    if data.isEmpty {
+                        emptyState(range: range)
+                    } else {
+                        tiles(data.totals)
+                        timeSeriesCard(data: data, range: range, timeZone: options.timeZone.foundationTimeZone)
+                        div(.class("cols")) {
+                            agentsCard(data.topAgents)
+                            pagesCard(data.topPages)
+                        }
+                        referralsCard(data.referrals)
+                    }
+                    footnote(knownAgentCount: knownAgentCount)
+                }
+            }
+        }
+        return "<!DOCTYPE html>" + page.render()
+    }
+
+    // MARK: - Header and filters
+
+    private static func header(
+        title: String,
+        base: String,
+        range: BotDateRange,
+        siteName: String,
+        generatedAt: Date,
+        timeZone: TimeZone
+    ) -> some HTML {
+        div(.class("top")) {
+            div {
+                h1 { title }
+                p(.class("sub")) {
+                    "\(siteName) \u{00B7} \(range.label) \u{00B7} generated \(timestamp(generatedAt, timeZone: timeZone))"
+                }
+            }
+            form(.method(.post), .action("\(base)/logout")) {
+                button(.type(.submit), .class("btn")) { "Sign out" }
+            }
+        }
+    }
+
+    private static func filters(
+        base: String,
+        range: BotDateRange,
+        ranges: [BotDateRange],
+        sites: [BotDashboardSite],
+        selectedSite: BotDashboardSite?
+    ) -> some HTML {
+        div(.class("filters")) {
+            // A switcher with only "All sites" in it would be noise: a
+            // single-site app gets the range pills alone.
+            if sites.count > 1 {
+                siteSwitcher(base: base, range: range, sites: sites, selectedSite: selectedSite)
+            }
+            div(.class("pills")) {
+                for option in ranges {
+                    a(
+                        .href(dashboardURL(base: base, siteKey: selectedSite?.key ?? "all", range: option)),
+                        .class(option == range ? "pill on" : "pill")
+                    ) { option.shortLabel }
+                }
+            }
+        }
+    }
+
+    /// A `<details>` menu of plain links rather than a `<select>`, because a
+    /// native option cannot carry an image and the logo is what makes the
+    /// current site readable at a glance. Links keep it working with
+    /// JavaScript off, and every one carries an explicit `site=`, so choosing
+    /// "All sites" is not undone by the host default.
+    private static func siteSwitcher(
+        base: String,
+        range: BotDateRange,
+        sites: [BotDashboardSite],
+        selectedSite: BotDashboardSite?
+    ) -> some HTML {
+        details(.class("switcher")) {
+            summary(.custom(name: "aria-label", value: "Site: \(selectedSite?.name ?? "All sites")")) {
+                siteMark(selectedSite, sites: sites)
+                span { selectedSite?.name ?? "All sites" }
+                span(.class("chev"), .custom(name: "aria-hidden", value: "true")) { "\u{25BE}" }
+            }
+            div(.class("menu")) {
+                switcherLink(nil, base: base, sites: sites, range: range, isCurrent: selectedSite == nil)
+                ForEach(sites) { site in
+                    switcherLink(site, base: base, sites: sites, range: range, isCurrent: site == selectedSite)
+                }
+            }
+        }
+    }
+
+    @HTMLBuilder
+    private static func switcherLink(
+        _ site: BotDashboardSite?,
+        base: String,
+        sites: [BotDashboardSite],
+        range: BotDateRange,
+        isCurrent: Bool
+    ) -> some HTML {
+        let href = dashboardURL(base: base, siteKey: site?.key ?? "all", range: range)
+        if isCurrent {
+            a(.href(href), .class("on"), .custom(name: "aria-current", value: "page")) {
+                siteMark(site, sites: sites)
+                span { site?.name ?? "All sites" }
+            }
+        } else {
+            a(.href(href)) {
+                siteMark(site, sites: sites)
+                span { site?.name ?? "All sites" }
+            }
+        }
+    }
+
+    /// The site's logo, or for the all-sites view a 2×2 of every logo.
+    @HTMLBuilder
+    private static func siteMark(_ site: BotDashboardSite?, sites: [BotDashboardSite]) -> some HTML {
+        if let site {
+            if let logo = site.logoPath {
+                img(.src(logo), .alt(""), .class("logo"))
+            }
+        } else {
+            span(.class("logo all"), .custom(name: "aria-hidden", value: "true")) {
+                for logo in sites.compactMap(\.logoPath).prefix(4) {
+                    img(.src(logo), .alt(""))
+                }
+            }
+        }
+    }
+
+    private static func dashboardURL(base: String, siteKey: String, range: BotDateRange) -> String {
+        let key = siteKey.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? siteKey
+        return "\(base)/?site=\(key)&range=\(range.rawValue)"
+    }
+
+    // MARK: - Tiles
+
+    private static func tiles(_ totals: BotDashboardData.Totals) -> some HTML {
+        div(.class("tiles")) {
+            tile(
+                label: "AI agent visits",
+                value: BotCharts.compact(totals.botVisits),
+                note: "\(totals.distinctAgents) distinct agents",
+                isHero: true
+            )
+            tile(
+                label: "User-triggered",
+                value: BotCharts.compact(totals.userTriggered),
+                note: "Someone asked; the assistant read a page"
+            )
+            tile(
+                label: "Verified",
+                value: totals.verifiableShare.map(percentage) ?? "\u{2013}",
+                note: "of the visits we can check by IP"
+            )
+            tile(
+                label: "Spoofed",
+                value: BotCharts.compact(totals.spoofed),
+                note: "claimed an agent, IP says otherwise",
+                isAlert: totals.spoofed > 0
+            )
+            tile(
+                label: "AI referrals",
+                value: BotCharts.compact(totals.referrals),
+                note: "humans arriving from an AI answer"
+            )
+        }
+    }
+
+    private static func tile(
+        label: String,
+        value: String,
+        note: String,
+        isHero: Bool = false,
+        isAlert: Bool = false
+    ) -> some HTML {
+        div(.class(isHero ? "tile hero" : "tile")) {
+            div(.class("label")) { label }
+            div(.class(isAlert ? "value alert" : "value")) { value }
+            div(.class("note")) { note }
+        }
+    }
+
+    // MARK: - Cards
+
+    private static func timeSeriesCard(
+        data: BotDashboardData,
+        range: BotDateRange,
+        timeZone: TimeZone
+    ) -> some HTML {
+        div(.class("card")) {
+            h2 { "Visits over time" }
+            p(.class("hint")) {
+                "Stacked by what the agent was doing. \(range.isHourly ? "Hourly" : "Daily") buckets, \(timeZone.identifier)."
+            }
+            HTMLRaw(BotCharts.stackedColumns(series: data.series, range: range, timeZone: timeZone))
+            div(.class("legend")) {
+                for entry in data.purposeTotals {
+                    div {
+                        i(.custom(name: "style", value: "background:\(DashboardTheme.seriesColor(for: entry.purpose))")) {}
+                        span { entry.purpose.label }
+                        b { BotCharts.grouped(entry.count) }
+                    }
+                }
+            }
+        }
+    }
+
+    private static func agentsCard(_ agents: [BotDashboardData.AgentRow]) -> some HTML {
+        div(.class("card")) {
+            h2 { "Top agents" }
+            p(.class("hint")) { "Who is reading the site, and how much of it we could verify." }
+            if agents.isEmpty {
+                p(.class("hint")) { "No agent visits in this window." }
+            } else {
+                HTMLRaw(BotCharts.barRows(agents.map { agent in
+                    .init(
+                        name: agent.name,
+                        // "Diffbot Diffbot" helps nobody: the operator is only
+                        // worth showing when it adds something the name does not.
+                        meta: (agent.operatorName == "Unknown" || agent.operatorName == agent.name)
+                            ? nil : agent.operatorName,
+                        value: agent.count,
+                        note: agent.verified > 0 ? "\(BotCharts.grouped(agent.verified)) verified" : nil,
+                        color: agent.purpose.map(DashboardTheme.seriesColor(for:)) ?? "var(--baseline)",
+                        flag: agent.respectsRobotsTxt == false ? "ignores robots.txt" : nil
+                    )
+                }))
+            }
+        }
+    }
+
+    private static func pagesCard(_ pages: [BotDashboardData.PageRow]) -> some HTML {
+        div(.class("card")) {
+            h2 { "Most-read pages" }
+            p(.class("hint")) { "What AI agents actually pull. The user-triggered count is the one to watch." }
+            if pages.isEmpty {
+                p(.class("hint")) { "No page requests in this window." }
+            } else {
+                HTMLRaw(BotCharts.barRows(pages.map { page in
+                    .init(
+                        name: page.path,
+                        meta: nil,
+                        value: page.count,
+                        note: page.userTriggered > 0 ? "\(BotCharts.grouped(page.userTriggered)) user-triggered" : nil,
+                        color: "var(--series-1-soft)",
+                        flag: nil,
+                        highlight: page.userTriggered,
+                        highlightColor: "var(--series-1)"
+                    )
+                }))
+                // Two shades means two marks, so the legend is not optional.
+                div(.class("legend")) {
+                    div {
+                        i(.custom(name: "style", value: "background:var(--series-1)")) {}
+                        span { "User-triggered" }
+                    }
+                    div {
+                        i(.custom(name: "style", value: "background:var(--series-1-soft)")) {}
+                        span { "Crawled without a person asking" }
+                    }
+                }
+            }
+        }
+    }
+
+    private static func referralsCard(_ referrals: [BotDashboardData.PlatformRow]) -> some HTML {
+        div(.class("card")) {
+            h2 { "Visitors from AI assistants" }
+            p(.class("hint")) {
+                "Humans who clicked through from an AI answer. Analytics largely misses these: it is consent-gated, and many never accept."
+            }
+            if referrals.isEmpty {
+                p(.class("hint")) { "No AI referrals in this window." }
+            } else {
+                HTMLRaw(BotCharts.barRows(referrals.map { row in
+                    .init(name: row.platform, meta: nil, value: row.count, note: nil,
+                          color: "var(--series-3)", flag: nil)
+                }))
+            }
+        }
+    }
+
+    private static func emptyState(range: BotDateRange) -> some HTML {
+        div(.class("card")) {
+            div(.class("empty")) {
+                p { "Nothing recorded in the \(range.label.lowercased())." }
+                p(.class("hint")) {
+                    "Tracking starts the moment the middleware is deployed. It cannot see traffic from before that. Crawlers usually show up within a day."
+                }
+            }
+        }
+    }
+
+    private static func footnote(knownAgentCount: Int) -> some HTML {
+        p(.class("sub")) {
+            "\(knownAgentCount) known agents. \u{201C}Verified\u{201D} means the source IP fell inside the range list its operator publishes. OpenAI publishes one per agent, Anthropic one list for all three Claude agents, and everyone else publishes nothing we can check, so those stay unverified rather than counting against the rate."
+        }
+    }
+
+    /// Never rounds up to 100% while a single spoof is on record: the Spoofed
+    /// tile sits right beside this one, and "100% verified / 3 spoofed" reads as
+    /// a contradiction rather than as rounding.
+    private static func percentage(_ share: Double) -> String {
+        let scaled = share * 100
+        if share < 1, scaled >= 99.5 { return "99%" }
+        if share > 0, scaled < 0.5 { return "<1%" }
+        return "\(Int(scaled.rounded()))%"
+    }
+
+    private static func timestamp(_ date: Date, timeZone: TimeZone) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "d MMM HH:mm"
+        return formatter.string(from: date)
+    }
+}

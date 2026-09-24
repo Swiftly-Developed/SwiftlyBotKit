@@ -1,0 +1,95 @@
+@Tutorial(time: 15) {
+    @Intro(title: "Add SwiftlyBotKit to a Vapor app") {
+        Add the package to an existing Vapor 4 app, point it at PostgreSQL, install it with one call, and watch it record a crawler visit.
+
+        You need a Vapor app that already uses Fluent, and Docker or a local PostgreSQL server.
+    }
+
+    @Section(title: "Add the package") {
+        @ContentAndMedia {
+            SwiftlyBotKit depends on Vapor and Fluent but not on a database driver. Your app brings its own, and it has to be PostgreSQL: the migration creates PostgreSQL enum types and the dashboard queries use PostgreSQL-specific SQL.
+        }
+
+        @Steps {
+            @Step {
+                Start from your app's `Package.swift`. This one already uses Fluent with the PostgreSQL driver.
+
+                @Code(name: "Package.swift", file: add-01-package.swift)
+            }
+
+            @Step {
+                Add SwiftlyBotKit to the package dependencies, and its `SwiftlyBotKit` product to your app target.
+
+                @Code(name: "Package.swift", file: add-02-package.swift)
+            }
+        }
+    }
+
+    @Section(title: "Install the kit") {
+        @ContentAndMedia {
+            ``BotKit/install(on:config:)`` registers the migration, installs the tracking middleware and mounts the dashboard when credentials are configured. Where you call it matters.
+        }
+
+        @Steps {
+            @Step {
+                Open `configure.swift`. The app talks to PostgreSQL through Fluent and serves static files with `FileMiddleware`.
+
+                @Code(name: "configure.swift", file: add-03-configure.swift)
+            }
+
+            @Step {
+                Import `SwiftlyBotKit` and call ``BotKit/install(on:config:)`` after adding `FileMiddleware`. The middleware then sees the status code the client actually received.
+
+                With no configuration argument you get the defaults: one site, IP verification on, and a dashboard at `/admin/ai-bots/` once credentials are set.
+
+                @Code(name: "configure.swift", file: add-04-configure.swift)
+            }
+
+            @Step {
+                Run the migrations after `install`, so the one it registered is included. It creates the `ai_bot_visits` table, the `ai_agent_purpose` and `bot_verification` enum types, and three indexes.
+
+                If you run migrations with `swift run App migrate` instead of `autoMigrate()`, the order is the same: `install` first, then migrate.
+
+                @Code(name: "configure.swift", file: add-05-configure.swift)
+            }
+        }
+    }
+
+    @Section(title: "Record a visit") {
+        @ContentAndMedia {
+            Recording is on from the first request. Pretend to be a crawler and check that a row lands.
+        }
+
+        @Steps {
+            @Step {
+                Start a PostgreSQL server that matches the credentials in `configure.swift`.
+
+                @Code(name: "Terminal", file: add-06-terminal.sh)
+            }
+
+            @Step {
+                Run the app. On first boot, `autoMigrate()` creates the table.
+
+                You will see two warnings: no dashboard credentials, so the dashboard is not mounted, and no signing secret, so a random one is used. Both are expected at this point. The next tutorial deals with them.
+
+                @Code(name: "Terminal", file: add-07-terminal.sh)
+            }
+
+            @Step {
+                Request the home page with the user agent `GPTBot`, OpenAI's training crawler.
+
+                The response comes back as normal. The row is written in a detached task after the response has gone out, so recording never slows a reader down.
+
+                @Code(name: "Terminal", file: add-08-terminal.sh)
+            }
+
+            @Step {
+                Query the table. The request is recorded as `GPTBot` with the purpose `training`.
+
+                Its verification is `spoofed`, which is correct: OpenAI publishes the addresses `GPTBot` crawls from, and `127.0.0.1` is not one of them. If the app could not reach OpenAI's feed, the row says `unverified` instead. <doc:IPVerification> explains the difference.
+
+                @Code(name: "Terminal", file: add-09-terminal.sh)
+            }
+        }
+    }
+}

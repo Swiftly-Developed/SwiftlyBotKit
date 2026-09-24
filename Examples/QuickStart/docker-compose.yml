@@ -1,0 +1,16 @@
+# Local PostgreSQL for the QuickStart example.
+#   docker compose up -d
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: botkit
+      POSTGRES_PASSWORD: botkit
+      POSTGRES_DB: botkit
+    ports:
+      - "5432:5432"
+    volumes:
+      - botkit-data:/var/lib/postgresql/data
+
+volumes:
+  botkit-data:

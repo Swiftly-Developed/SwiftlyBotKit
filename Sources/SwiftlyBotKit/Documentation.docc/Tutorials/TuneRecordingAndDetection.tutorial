@@ -1,0 +1,119 @@
+@Tutorial(time: 20) {
+    @Intro(title: "Tune recording and detection") {
+        Tell the kit where the client IP really comes from, keep noise out of the table, recognise agents and assistants the built-in lists do not know, and decide how verification behaves.
+
+        This tutorial builds on <doc:AddSwiftlyBotKitToAVaporApp>.
+    }
+
+    @Section(title: "Read the client IP correctly") {
+        @ContentAndMedia {
+            IP verification is only as honest as the address it checks. The default, ``ClientIPStrategy/lastForwardedFor``, is right behind exactly one proxy that appends to `X-Forwarded-For`. Anything else needs a different strategy.
+        }
+
+        @Steps {
+            @Step {
+                Start with a configuration function that takes the app's environment, so later steps can vary by it.
+
+                @Code(name: "BotKitConfiguration.swift", file: tune-01-configure.swift)
+            }
+
+            @Step {
+                Behind a CDN that forwards to a load balancer, two proxies each append an entry, so the client is two from the right. Use ``ClientIPStrategy/forwardedFor(trustedProxies:)``.
+
+                An app that faces the internet directly should use ``ClientIPStrategy/remoteAddress``, and a proxy with its own header ``ClientIPStrategy/custom(_:)``. <doc:ClientIPAndProxies> explains what goes wrong when the choice does not match the hosting.
+
+                @Code(name: "BotKitConfiguration.swift", file: tune-02-configure.swift)
+            }
+        }
+    }
+
+    @Section(title: "Keep noise out") {
+        @ContentAndMedia {
+            Only requests that match a known agent or an AI assistant referrer are ever recorded. Static assets and the dashboard's own path are skipped on top of that.
+        }
+
+        @Steps {
+            @Step {
+                Exclude path prefixes that are never worth a row, and add a file extension to the ignored set.
+
+                Leave `.txt` and `.xml` recorded. A crawler fetching `robots.txt` or `sitemap.xml` is exactly the kind of signal this kit exists to show.
+
+                @Code(name: "BotKitConfiguration.swift", file: tune-03-configure.swift)
+            }
+        }
+    }
+
+    @Section(title: "Teach it new agents and assistants") {
+        @ContentAndMedia {
+            The built-in ``AIAgentCatalog`` knows about 175 agents and ``LLMReferrer/builtInPlatforms`` knows the major assistants. Your own entries are added on top.
+        }
+
+        @Steps {
+            @Step {
+                Add an ``AIAgent`` for an agent the catalog does not know. An entry whose token equals a built-in one replaces it, which is how you reclassify an agent.
+
+                @Code(name: "BotKitConfiguration.swift", file: tune-04-configure.swift)
+            }
+
+            @Step {
+                Add an ``LLMReferrer/Platform`` for an assistant whose visitors you want counted as AI referrals. The host suffix also matches its subdomains.
+
+                @Code(name: "BotKitConfiguration.swift", file: tune-05-configure.swift)
+            }
+        }
+    }
+
+    @Section(title: "Decide how verification behaves") {
+        @ContentAndMedia {
+            Verification checks a claimed agent against the IP ranges its operator publishes. Out of the box that covers OpenAI, Anthropic and Perplexity.
+        }
+
+        @Steps {
+            @Step {
+                Add a ``CrawlerRangeFeed`` for any operator that publishes ranges in the same JSON shape, and shorten the refresh interval if you like.
+
+                Keep ``CrawlerRangeFeed/defaults`` in the list: replacing it outright would turn off verification for the built-in agents.
+
+                @Code(name: "BotKitConfiguration.swift", file: tune-06-configure.swift)
+            }
+
+            @Step {
+                Turn verification off in development. No feed is fetched and every agent is stored as ``BotVerification/unverified``, which keeps a laptop without network access from logging feed warnings.
+
+                @Code(name: "BotKitConfiguration.swift", file: tune-07-configure.swift)
+            }
+
+            @Step {
+                Pass the app's environment when installing.
+
+                @Code(name: "configure.swift", file: tune-08-configure.swift)
+            }
+        }
+    }
+
+    @Section(title: "Try it") {
+        @ContentAndMedia {
+            Send a few requests that exercise each change.
+        }
+
+        @Steps {
+            @Step {
+                Request a page as the custom agent. It is recorded with the purpose you gave it.
+
+                @Code(name: "Terminal", file: tune-09-terminal.sh)
+            }
+
+            @Step {
+                Arrive with a DeepSeek referrer, then ask for an excluded path as a known crawler. The first is recorded as a referral; the second is not recorded at all.
+
+                @Code(name: "Terminal", file: tune-10-terminal.sh)
+            }
+
+            @Step {
+                Query the table. The referral row has `referrer_platform` set and `agent_name` empty, and its verification is `notApplicable`.
+
+                @Code(name: "Terminal", file: tune-11-terminal.sh)
+            }
+        }
+    }
+}

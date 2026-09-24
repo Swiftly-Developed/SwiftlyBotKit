@@ -1,0 +1,61 @@
+name: Catalog freshness
+
+# Regenerates the AI agent catalog from the upstream ai.robots.txt list and
+# opens a pull request when it changed. Quarterly, plus on demand.
+#
+# Needs no secrets: the pull request is opened with the workflow's own
+# GITHUB_TOKEN. Enable "Allow GitHub Actions to create and approve pull
+# requests" in the repository's Actions settings. Pull requests opened with
+# GITHUB_TOKEN do not trigger CI on their own; close and reopen the PR, or push
+# to its branch, to run the checks.
+
+on:
+  schedule:
+    # 06:00 UTC on the 1st of January, April, July and October.
+    - cron: "0 6 1 1,4,7,10 *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Regenerate the catalog
+        id: generate
+        run: |
+          {
+            echo "summary<<EOF"
+            python3 Scripts/generate-ai-agent-catalog.py
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open a pull request if the catalog changed
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: automation/catalog-refresh
+          delete-branch: true
+          add-paths: Sources/SwiftlyBotKit/Catalog/AIAgentCatalogData.swift
+          commit-message: "chore(catalog): regenerate the AI agent catalog from ai.robots.txt"
+          title: "Regenerate the AI agent catalog"
+          body: |
+            Scheduled regeneration of `Sources/SwiftlyBotKit/Catalog/AIAgentCatalogData.swift`
+            from [ai-robots-txt/ai.robots.txt](https://github.com/ai-robots-txt/ai.robots.txt).
+
+            Generator output:
+
+            ```
+            ${{ steps.generate.outputs.summary }}
+            ```
+
+            Before merging, review the "unclassified fallback" count. Any new agent that
+            matters should get a hand-audited entry in `PURPOSE_OVERRIDES` in
+            `Scripts/generate-ai-agent-catalog.py`, then rerun the script.
