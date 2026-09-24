@@ -45,7 +45,7 @@
 
     @Section(title: "Teach it new agents and assistants") {
         @ContentAndMedia {
-            The built-in ``AIAgentCatalog`` knows about 175 agents and ``LLMReferrer/builtInPlatforms`` knows the major assistants. Your own entries are added on top.
+            The built-in ``AIAgentCatalog`` knows about 167 agents and ``LLMReferrer/builtInPlatforms`` knows the major assistants. Your own entries are added on top.
         }
 
         @Steps {

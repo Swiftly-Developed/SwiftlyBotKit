@@ -33,6 +33,104 @@ final class BotDateRangeTests: XCTestCase {
         let now = Date()
         XCTAssertEqual(BotDateRange.month.start(from: now, in: brussels), BotDateRange.month.buckets(now: now, in: brussels).first)
     }
+
+    // MARK: DST, computed without a database
+
+    private func zone(_ id: String) -> TimeZone { TimeZone(identifier: id)! }
+
+    private func labels(_ range: BotDateRange, now: Date, in tz: TimeZone) -> [String] {
+        range.buckets(now: now, in: tz).map { range.axisLabel(for: $0, in: tz) }
+    }
+
+    /// 2026-10-25, Brussels falls back at 03:00 CEST to 02:00 CET. The
+    /// repeated hour is one bucket: 24 distinct labels over 25 real hours.
+    func testRepeatedHourIsOneBucket() throws {
+        let now = Date(timeIntervalSince1970: 1_792_927_200) // 2026-10-25 12:20 CET
+        let window = BotDateRange.day.window(now: now, in: brussels)
+        let labels = labels(.day, now: now, in: brussels)
+        XCTAssertEqual(labels.count, 24)
+        XCTAssertEqual(Set(labels).count, 24, "a label repeats: \(labels)")
+        XCTAssertEqual(now.timeIntervalSince(window.start), 24 * 3_600 + 20 * 60)
+        // Both passes of 02:00 follow each other, so they are one run of two
+        // real hours.
+        let index = try XCTUnwrap(labels.firstIndex(of: "02:00"))
+        XCTAssertEqual(window.buckets[index + 1].start.timeIntervalSince(window.buckets[index].start), 7_200)
+    }
+
+    /// 2026-03-29, Brussels skips 02:00. 24 buckets, the newest just begun, so
+    /// 23 real hours, and no "02:00" among them.
+    func testSkippedHourHasNoBucket() {
+        let now = Date(timeIntervalSince1970: 1_774_789_200) // 2026-03-29 15:00 CEST
+        let labels = labels(.day, now: now, in: brussels)
+        XCTAssertEqual(labels.count, 24)
+        XCTAssertFalse(labels.contains("02:00"))
+        XCTAssertEqual(now.timeIntervalSince(BotDateRange.day.start(from: now, in: brussels)), 23 * 3_600)
+    }
+
+    /// Santiago springs forward at local midnight (2026-09-06): that day's
+    /// bucket starts at 01:00, and the 23-hour day is still one bucket.
+    func testDayWhoseMidnightIsSkippedStartsAtOne() {
+        let santiago = zone("America/Santiago")
+        let now = Date(timeIntervalSince1970: 1_788_800_000) // 2026-09-07 13:53 -03
+        let buckets = BotDateRange.week.buckets(now: now, in: santiago)
+        XCTAssertEqual(buckets.count, 7)
+        let calendar = BotDateRange.calendar(in: santiago)
+        let hours = buckets.map { calendar.component(.hour, from: $0) }
+        XCTAssertEqual(hours.filter { $0 == 1 }.count, 1, "\(hours)")
+        XCTAssertEqual(hours.filter { $0 == 0 }.count, 6, "\(hours)")
+        XCTAssertEqual(Set(labels(.week, now: now, in: santiago)).count, 7)
+    }
+
+    /// Lord Howe moves 30 minutes. Labels still name whole wall-clock hours.
+    func testHalfHourDSTLabelsWholeHours() {
+        let lordHowe = zone("Australia/Lord_Howe")
+        for now in [Date(timeIntervalSince1970: 1_775_318_400), Date(timeIntervalSince1970: 1_791_043_200)] {
+            let labels = labels(.day, now: now, in: lordHowe)
+            XCTAssertEqual(labels.count, 24)
+            XCTAssertEqual(Set(labels).count, 24, "\(labels)")
+            XCTAssertTrue(labels.allSatisfy { $0.hasSuffix(":00") }, "\(labels)")
+        }
+    }
+
+    /// Chatham falls back at 03:45: wall-clock 02:45 to 03:45 happens twice,
+    /// interleaved with the first pass. Two buckets, four runs, no repeats.
+    func testChathamInterleavedRepeatIsMerged() {
+        let chatham = zone("Pacific/Chatham")
+        let now = Date(timeIntervalSince1970: 1_775_386_800) // 2026-04-05 23:45 +12:45
+        let window = BotDateRange.day.window(now: now, in: chatham)
+        let labels = labels(.day, now: now, in: chatham)
+        XCTAssertEqual(labels.count, 24)
+        XCTAssertEqual(Set(labels).count, 24, "\(labels)")
+        XCTAssertNotEqual(window.runs.map(\.bucket), window.runs.map(\.bucket).sorted(), "runs should interleave")
+        XCTAssertGreaterThan(window.runs.count, window.buckets.count)
+    }
+
+    /// A fixed offset has no transitions; every bucket is aligned to it.
+    func testFixedOffsetBuckets() {
+        let plus0545 = TimeZone(secondsFromGMT: 5 * 3_600 + 2_700)!
+        let now = Date(timeIntervalSince1970: 1_774_785_600)
+        let buckets = BotDateRange.week.buckets(now: now, in: plus0545)
+        XCTAssertEqual(buckets.count, 7)
+        for bucket in buckets {
+            XCTAssertEqual((Int(bucket.timeIntervalSince1970) + plus0545.secondsFromGMT()) % 86_400, 0)
+        }
+    }
+
+    /// Every named zone gets the full bucket count for every range, at a
+    /// fall-back and a spring-forward instant for either hemisphere.
+    func testEveryNamedZoneGetsAFullWindow() {
+        let instants = [1_774_785_600.0, 1_775_386_800, 1_792_890_000, 1_788_800_000].map(Date.init(timeIntervalSince1970:))
+        for zone in BotKitTimeZone.allNamed {
+            let tz = zone.foundationTimeZone
+            for now in instants {
+                for range in BotDateRange.allCases {
+                    let window = range.window(now: now, in: tz)
+                    XCTAssertEqual(window.buckets.count, range.bucketCount, "\(zone.identifier) \(range)")
+                    XCTAssertLessThanOrEqual(window.start, now)
+                }
+            }
+        }
+    }
 }
 
 final class BotChartsTests: XCTestCase {

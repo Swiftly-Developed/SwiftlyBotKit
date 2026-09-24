@@ -12,7 +12,7 @@ For a guided version of this page, follow the tutorial <doc:AddSwiftlyBotKitToAV
 
 - Swift 6.0 or later, on macOS 14 or later, or on Linux.
 - A Vapor 4 app using Fluent.
-- PostgreSQL. The migration creates PostgreSQL enum types, and the dashboard's queries use `COUNT(*) FILTER`, `date_trunc`, `AT TIME ZONE` and `BOOL_AND`. Other databases are not supported.
+- PostgreSQL. The migration creates PostgreSQL enum types, and the dashboard's queries use `COUNT(*) FILTER`, `width_bucket` over `timestamptz` arrays and `BOOL_AND`. Other databases are not supported.
 
 ### Add the dependency
 
@@ -53,7 +53,7 @@ try await app.autoMigrate()
 - ``BotKit/configure(for:database:)`` registers the migration. It must run before `app.autoMigrate()` or `swift run App migrate`.
 - ``BotKit/configureRoutes(for:config:)`` installs the tracking middleware and, when credentials resolve, the dashboard routes. Call it after adding `FileMiddleware`, so the status code it records is the one the client received.
 
-Do not call both `install` and `configure(for:)`, or the migration is registered twice.
+Call either `install` or the two separately, not both: a second setup throws ``BotKitConfigurationError/alreadyInstalled(_:)`` at boot.
 
 BotKit does not need a database of its own. The migration adds one table, `ai_bot_visits`, and two enum types to the app's default database, next to the app's own tables, and recording and the dashboard use that same database. If the app registers several databases, set ``BotKitConfiguration/database`` to the one BotKit should use. It must be PostgreSQL.
 
@@ -87,6 +87,6 @@ Then open `/admin/ai-bots/` and sign in. Without the first two, the dashboard is
 
 ### Next steps
 
-- <doc:Configuration> lists every option.
+- <doc:ConfiguringSwiftlyBotKit> lists every option.
 - <doc:ClientIPAndProxies> matters before you trust the verification numbers in production.
 - <doc:UnderstandingAgentPurposes> explains how to read what the dashboard shows.

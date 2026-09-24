@@ -12,6 +12,10 @@ SwiftlyBotKit uses the client's IP address for three things:
 
 All three are only as honest as the address they are given. ``BotKitConfiguration/clientIP`` decides where it comes from.
 
+In one line: **one appending proxy, the default ``ClientIPStrategy/lastForwardedFor``; `n` proxies, ``ClientIPStrategy/forwardedFor(trustedProxies:)``; no proxy, ``ClientIPStrategy/remoteAddress``; a proxy with its own header, ``ClientIPStrategy/custom(_:)``.**
+
+> Important: The default trusts `X-Forwarded-For` whoever sent it, because it assumes a proxy that appends the address it saw. **An app that is exposed directly must use ``ClientIPStrategy/remoteAddress``.** That includes an app behind a proxy that clients can also reach around it, for example on a platform hostname that bypasses your CDN, unless the origin is locked to the proxy. Otherwise a client writes the last entry itself, claims an operator's address to be counted as verified, and resets the sign-in throttle on every attempt.
+
 ### Why the last X-Forwarded-For entry
 
 `X-Forwarded-For` is a comma-separated list. Each proxy a request passes through appends the address it received the request from. The client can send the header too, with anything in it:
@@ -35,7 +39,7 @@ The entry your own proxy appended is the only one you can trust, and with one pr
 
 - ``ClientIPStrategy/custom(_:)``: Your own extraction, for a proxy that puts the client address in another header such as `CF-Connecting-IP` or `Fly-Client-IP`. Return `nil` when the address is unknown.
 
-Several `X-Forwarded-For` headers on one request are treated as one list, in order.
+Several `X-Forwarded-For` headers on one request are treated as one list, in order. The chosen entry is read without a port or brackets: `1.2.3.4:5678` is `1.2.3.4`, and `[2600::5]:443` and `[2600::5]` are `2600::5`. A port is only removed from a bracketed entry or one with exactly one colon, so a plain IPv6 address is never cut short.
 
 ### Matching the strategy to your hosting
 

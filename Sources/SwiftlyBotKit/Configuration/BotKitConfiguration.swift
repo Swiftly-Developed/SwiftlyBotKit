@@ -25,20 +25,31 @@ public struct BotKitConfiguration: Sendable {
     /// The site key used when the app does not supply its own `siteKey`.
     public static let defaultSiteKey = "default"
 
+    /// The `?site=` value of the dashboard's all-sites view, and therefore not
+    /// usable as a site key in ``sites``.
+    ///
+    /// When ``siteKey`` returns it at runtime, the row is stored under `all`
+    /// as returned and a warning is logged once per process. Such rows count
+    /// towards the all-sites view but can never be filtered to on their own.
+    public static let reservedAllSitesKey = "all"
+
     /// Which site a request belongs to, stored on every recorded row as
     /// `site_key`.
     ///
     /// A multi-site app should return the same key its own host-based routing
     /// uses, so the dashboard's site filter splits traffic the way the router
     /// does. A single-site app can leave the default, which files everything
-    /// under ``defaultSiteKey``.
+    /// under ``defaultSiteKey``. Never return ``reservedAllSitesKey``.
     public var siteKey: @Sendable (Request) -> String
 
     /// The sites the dashboard's switcher offers. Keys must match what
     /// ``siteKey`` returns.
     ///
     /// Leave empty for a single-site app: the switcher is only shown when there
-    /// are at least two sites to choose between.
+    /// are at least two sites to choose between. The key `all` is reserved for
+    /// the all-sites view (``reservedAllSitesKey``): a site keyed `all` makes
+    /// `BotKit.configureRoutes(for:config:)` throw. A key listed twice is
+    /// logged as a warning and only its first entry is offered.
     public var sites: [BotDashboardSite]
 
     /// The HMAC key behind dashboard session cookies and the keyed hash that
@@ -106,8 +117,14 @@ public struct BotKitConfiguration: Sendable {
     /// switcher link and range pill carries, so choosing it sticks.
     func site(forKey key: String?, hostSiteKey: String) -> BotDashboardSite? {
         let key = key ?? hostSiteKey
-        guard key != "all" else { return nil }
+        guard key != Self.reservedAllSitesKey else { return nil }
         return sites.first { $0.key == key }
+    }
+
+    /// `sites` with every repeated key after its first entry removed.
+    static func uniqueSites(_ sites: [BotDashboardSite]) -> [BotDashboardSite] {
+        var seen = Set<String>()
+        return sites.filter { seen.insert($0.key).inserted }
     }
 }
 
@@ -148,7 +165,19 @@ extension BotKitConfiguration {
         /// Path prefixes that are never recorded, such as `/healthz` or an
         /// internal API. The dashboard's own path is always excluded on top of
         /// these. Default empty.
+        ///
+        /// These are plain string prefixes, not path segments: `/health`
+        /// also excludes `/health-insurance/`. End an entry with `/`
+        /// (`/health/`) to exclude only what sits below it.
         public var excludedPathPrefixes: [String]
+
+        /// The most recording writes allowed in flight at once. Each recorded
+        /// request hands its write to a detached task; with a slow database and
+        /// a crawler burst those tasks would otherwise pile up in memory
+        /// without bound. Beyond this many, further rows are dropped and a
+        /// warning is logged (the first drop, then every thousandth). Values
+        /// below 1 count as 1. Default `256`.
+        public var maximumPendingWrites: Int
 
         /// `true` when at least one kind of traffic is recorded. When `false`,
         /// the tracking middleware is not installed at all.
@@ -159,12 +188,14 @@ extension BotKitConfiguration {
             recordsAgents: Bool = true,
             recordsReferrals: Bool = true,
             ignoredFileExtensions: Set<String> = Recording.defaultIgnoredFileExtensions,
-            excludedPathPrefixes: [String] = []
+            excludedPathPrefixes: [String] = [],
+            maximumPendingWrites: Int = 256
         ) {
             self.recordsAgents = recordsAgents
             self.recordsReferrals = recordsReferrals
             self.ignoredFileExtensions = ignoredFileExtensions
             self.excludedPathPrefixes = excludedPathPrefixes
+            self.maximumPendingWrites = maximumPendingWrites
         }
     }
 }
@@ -254,7 +285,11 @@ extension BotKitConfiguration {
 ///
 /// Feeds use the JSON shape the major operators share:
 /// `{"prefixes": [{"ipv4Prefix": "…"}, {"ipv6Prefix": "…"}]}`. The body is
-/// decoded whatever `Content-Type` it is served with.
+/// decoded whatever `Content-Type` it is served with, an entry that does not
+/// fit the shape is skipped rather than failing the feed, and prefixes broader
+/// than an IPv4 `/8` or an IPv6 `/16` are ignored. Each fetch has a
+/// ten-second deadline and a 2 MiB body limit. When several feeds name the
+/// same agent, their ranges are combined.
 public struct CrawlerRangeFeed: Sendable, Equatable {
 
     /// The feeds of OpenAI, Anthropic and Perplexity.
@@ -295,12 +330,33 @@ public struct CrawlerRangeFeed: Sendable, Equatable {
 /// appends to, so its leftmost entry is whatever the client chose to send.
 /// Trusting it would let any spoofer claim an operator's address and earn a
 /// `verified` badge.
+///
+/// Choosing one:
+/// - behind exactly one proxy that appends to `X-Forwarded-For`:
+///   ``lastForwardedFor`` (the default);
+/// - behind a chain of `n` appending proxies: ``forwardedFor(trustedProxies:)``;
+/// - reachable directly from the internet, with no proxy: ``remoteAddress``;
+/// - behind a proxy that sets its own header: ``custom(_:)``.
+///
+/// The default trusts the header whoever sent it. An app that clients can reach
+/// without passing through the proxy (exposed directly, or on a platform
+/// hostname that bypasses a CDN) **must** use ``remoteAddress`` or lock the
+/// origin to the proxy, or a client can write the last entry itself.
+///
+/// Forwarded entries are read leniently: `1.2.3.4:5678`, `[2600::5]:443` and
+/// `[2600::5]` yield the bare address. A port is only stripped from a
+/// bracketed entry or one with exactly one colon, so a plain IPv6 address is
+/// never cut short.
 public enum ClientIPStrategy: Sendable {
 
     /// The last `X-Forwarded-For` entry, falling back to the socket's remote
     /// address when the header is absent. Right for exactly one trusted
     /// reverse proxy or load balancer that appends the address it saw (Heroku,
     /// most PaaS routers, a single nginx). The default.
+    ///
+    /// Wrong for an app that faces the internet directly: there nothing
+    /// appends to the header, so the client writes the last entry itself. Use
+    /// ``remoteAddress`` there.
     case lastForwardedFor
 
     /// The entry `trustedProxies` positions from the right of
@@ -337,7 +393,8 @@ public enum ClientIPStrategy: Sendable {
     }
 
     /// The `position`-th `X-Forwarded-For` entry counting from the right
-    /// (1-based), or the first entry when there are fewer.
+    /// (1-based), or the first entry when there are fewer, without a port or
+    /// brackets.
     static func forwardedEntry(in headers: HTTPHeaders, fromRight position: Int) -> String? {
         let entries = headers[.xForwardedFor]
             .flatMap { $0.split(separator: ",") }
@@ -345,8 +402,33 @@ public enum ClientIPStrategy: Sendable {
             .filter { !$0.isEmpty }
         guard !entries.isEmpty else { return nil }
         let index = max(entries.count - position, 0)
-        return entries[index]
+        return hostOnly(entries[index])
     }
+
+    /// `1.2.3.4:5678` to `1.2.3.4`, `[2600::5]:443` and `[2600::5]` to
+    /// `2600::5`. Anything else, including a bare IPv6 address, is returned
+    /// unchanged.
+    static func hostOnly(_ entry: String) -> String {
+        if entry.hasPrefix("[") {
+            guard let close = entry.firstIndex(of: "]") else { return entry }
+            let host = entry[entry.index(after: entry.startIndex)..<close]
+            let rest = entry[entry.index(after: close)...]
+            if rest.isEmpty { return String(host) }
+            let port = rest.dropFirst()
+            guard rest.first == ":", !port.isEmpty, port.allSatisfy(\.isASCIIDigit) else { return entry }
+            return String(host)
+        }
+        guard entry.utf8.lazy.filter({ $0 == UInt8(ascii: ":") }).count == 1,
+              let colon = entry.firstIndex(of: ":")
+        else { return entry }
+        let port = entry[entry.index(after: colon)...]
+        guard !port.isEmpty, port.allSatisfy(\.isASCIIDigit) else { return entry }
+        return String(entry[..<colon])
+    }
+}
+
+private extension Character {
+    var isASCIIDigit: Bool { isASCII && isNumber }
 }
 
 // MARK: - Dashboard
@@ -367,6 +449,13 @@ extension BotKitConfiguration {
         /// Where the dashboard is mounted, e.g. `/admin/ai-bots`. The sign-in
         /// and sign-out endpoints sit below it. Keep it under a path your
         /// `robots.txt` disallows. Default `/admin/ai-bots`.
+        ///
+        /// Every segment is taken literally and may use only letters, digits,
+        /// `-`, `.`, `_` and `~`; `.` and `..` segments are not allowed. The
+        /// root path `/` is refused, since the dashboard would take over the
+        /// app's own `/`, `/login` and `/logout`. An invalid path makes
+        /// `BotKit.configureRoutes(for:config:)` throw
+        /// ``BotKitConfigurationError/invalidDashboardPath(_:reason:)``.
         public var path: String
 
         /// The sign-in username. Default `.environment("BOT_DASHBOARD_USER")`.
@@ -394,7 +483,11 @@ extension BotKitConfiguration {
         /// Default ``BotDateRange/week``.
         public var defaultDateRange: BotDateRange
 
-        /// The session cookie's name. Default `botkit_dashboard`.
+        /// The session cookie's name, which must be an RFC 6265 token (visible
+        /// ASCII, none of `()<>@,;:\"/[]?={}`, no spaces). An invalid name makes
+        /// `BotKit.configureRoutes(for:config:)` throw
+        /// ``BotKitConfigurationError/invalidSessionCookieName(_:)``. Default
+        /// `botkit_dashboard`.
         public var sessionCookieName: String
 
         /// How long a sign-in lasts. Default twelve hours.
@@ -453,10 +546,12 @@ extension BotKitConfiguration {
             path.split(separator: "/").map(String.init)
         }
 
-        /// ``dateRanges``, or ``defaultDateRange`` alone when that is empty, so
-        /// there is always at least one pill.
+        /// ``dateRanges`` without repeats, or ``defaultDateRange`` alone when
+        /// that is empty, so there is always exactly one pill per range.
         var offeredDateRanges: [BotDateRange] {
-            dateRanges.isEmpty ? [defaultDateRange] : dateRanges
+            guard !dateRanges.isEmpty else { return [defaultDateRange] }
+            var seen = Set<BotDateRange>()
+            return dateRanges.filter { seen.insert($0).inserted }
         }
 
         /// The range for a `?range=` value.
@@ -472,21 +567,30 @@ extension BotKitConfiguration {
     /// Failed sign-in throttling, in memory and per process.
     public struct LoginLimit: Sendable, Equatable {
 
-        /// Five failures per fifteen minutes.
+        /// Five failures per client and fifty in total per fifteen minutes.
         public static let `default` = LoginLimit()
 
-        /// Failures allowed within ``window`` before further attempts are
-        /// refused. Default `5`.
+        /// Failures allowed per client within ``window`` before that client's
+        /// further attempts are refused. Values below 1 count as 1. Default
+        /// `5`.
         public var maximumFailures: Int
 
         /// The sliding window failures are counted over. Default fifteen
         /// minutes.
         public var window: TimeInterval
 
+        /// Failures allowed from every client together within ``window``.
+        /// When reached, every sign-in is refused (the owner's included) until
+        /// the window passes: a hard bound on guesses even when clients can
+        /// rotate their apparent address. Never lower than
+        /// ``maximumFailures``. Default `50`.
+        public var globalMaximumFailures: Int
+
         /// Creates a login limit.
-        public init(maximumFailures: Int = 5, window: TimeInterval = 15 * 60) {
+        public init(maximumFailures: Int = 5, window: TimeInterval = 15 * 60, globalMaximumFailures: Int = 50) {
             self.maximumFailures = maximumFailures
             self.window = window
+            self.globalMaximumFailures = globalMaximumFailures
         }
     }
 
@@ -508,8 +612,10 @@ extension BotKitConfiguration {
 /// A string setting that is either given directly or read from an environment
 /// variable when the dashboard is configured.
 ///
-/// A string literal is a direct value, so `username: "owner"` works. An empty
-/// value, or an unset variable, counts as not configured.
+/// A string literal is a direct value, so `username: "owner"` works. Surrounding
+/// whitespace and newlines are trimmed (a secret pasted with a trailing newline
+/// is the secret without it), and an empty or whitespace-only value, or an
+/// unset variable, counts as not configured.
 public enum BotKitConfigValue: Sendable, Equatable, ExpressibleByStringLiteral {
     /// Read from this environment variable when `BotKit.configureRoutes(for:config:)` runs, not when the configuration is built.
     case environment(String)
@@ -521,16 +627,17 @@ public enum BotKitConfigValue: Sendable, Equatable, ExpressibleByStringLiteral {
         self = .value(value)
     }
 
-    /// The configured value, or `nil` when it is empty or the variable is
-    /// unset.
+    /// The configured value with surrounding whitespace and newlines
+    /// trimmed, or `nil` when that leaves nothing or the variable is unset.
     public func resolve() -> String? {
         let raw: String?
         switch self {
         case .environment(let key): raw = Environment.get(key)
         case .value(let value): raw = value
         }
-        guard let raw, !raw.isEmpty else { return nil }
-        return raw
+        guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty
+        else { return nil }
+        return trimmed
     }
 }
 

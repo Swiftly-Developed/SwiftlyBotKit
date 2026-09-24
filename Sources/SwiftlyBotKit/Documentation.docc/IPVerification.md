@@ -43,10 +43,14 @@ Google and Common Crawl ask site owners to verify their crawlers with forward-co
 
 - The first agent visit after the process starts waits for the fetch, so the first minutes of traffic are not quietly mislabelled as unverified.
 - After that, ranges are answered from memory. Once ``BotKitConfiguration/Verification/refreshInterval`` (12 hours by default) has passed, the next lookup starts a refresh in the background and does not wait for it.
-- A feed that fails keeps the ranges already held for it. A total failure never wipes the cache, because that would turn every verified visit into a spoof.
+- Each fetch has a ten-second deadline and a 2 MiB size limit, and only a `200` is accepted.
+- A feed that fails keeps the ranges already held for it. A total failure never wipes the cache, because that would turn every verified visit into a spoof. A failed feed is retried with back-off: after 1 minute, then 2, 4 and 8, then every 15 minutes until it succeeds. That includes a feed that failed at boot: it is retried on that schedule, not after the full refresh interval, and hits in the meantime do not trigger extra fetches.
+- Within a feed, an entry that does not fit the shape (a number where a string belongs, an unknown key) is skipped rather than failing the whole feed, and an entry carrying both `ipv4Prefix` and `ipv6Prefix` contributes both.
+- Prefixes broader than an IPv4 `/8` or an IPv6 `/16` are ignored, and logged once per feed. No operator publishes anything close to that, and a catch-all block in a feed served wrong would verify every spoofer.
+- When several feeds list the same agent, their ranges are combined, so adding a feed for an agent the defaults already cover extends its ranges rather than replacing them.
 - Each feed's body is decoded as JSON whatever `Content-Type` it is served with. Vendors do not agree on the header: one serves its list as `application/octet-stream`.
 
-A feed that cannot be refreshed logs a warning that starts `Could not refresh AI crawler ranges from`. If you see it repeatedly, the agents that feed covers have fallen back to unverified.
+A feed that cannot be refreshed logs a warning that starts `Could not refresh AI crawler ranges from`. If you see it repeatedly, the ranges already held for that feed are still being used, but they are getting older. Only when a feed has never loaded since the process started do the agents it covers fall back to unverified.
 
 Verification runs in the detached task that writes the row, so a feed fetch never delays a response.
 
@@ -68,7 +72,7 @@ config.verification.feeds = CrawlerRangeFeed.defaults + [
 ]
 ```
 
-``IPRange`` is the CIDR matcher behind the check. It handles IPv4, IPv6, and IPv4-mapped IPv6 addresses, which some dual-stack proxies pass along.
+``IPRange`` is the CIDR matcher behind the check. It handles IPv4, IPv6, and IPv4-mapped IPv6 addresses, which some dual-stack proxies pass along. Parsing is strict and the same on every platform: IPv4 octets with leading zeros (`020.1.2.3`, which some parsers read as octal), zone ids (`fe80::1%en0`), whitespace, NUL and any other stray character are rejected, so such an address is never verified.
 
 ### Turning it off
 

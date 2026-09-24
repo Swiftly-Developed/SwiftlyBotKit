@@ -53,6 +53,18 @@ final class IPRangeTests: XCTestCase {
         XCTAssertNil(IPRange(cidr: ""))
         XCTAssertFalse(IPRange(cidr: "20.171.207.0/24")!.contains("garbage"))
     }
+
+    /// Checked before `inet_pton`, so Darwin and Linux agree.
+    func testStrictAddressParsing() {
+        for bad in ["01.2.3.4", "1.2.3.04", "1.2.3.4\0", "1.2.3.4\u{0}junk", "fe80::1%en0", "::ffff:01.2.3.4",
+                    "1.2.3.4 ", "１.2.3.4", "g::1", "1.2.3.4.5", "256.1.1.1", ""] {
+            XCTAssertNil(IPRange.parse(address: bad), bad.debugDescription)
+        }
+        XCTAssertEqual(IPRange.parse(address: "0.0.0.0"), [0, 0, 0, 0])
+        XCTAssertEqual(IPRange.parse(address: "10.0.200.255"), [10, 0, 200, 255])
+        XCTAssertEqual(IPRange.parse(address: "::ffff:10.0.0.1"), [10, 0, 0, 1])
+        XCTAssertEqual(IPRange.parse(address: "2001:db8::1")?.count, 16)
+    }
 }
 
 final class CrawlerFeedDecodingTests: XCTestCase {

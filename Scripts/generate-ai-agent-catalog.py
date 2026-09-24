@@ -2,11 +2,27 @@
 """Regenerates SwiftlyBotKit's agent catalog from the upstream ai.robots.txt list.
 
     python3 Scripts/generate-ai-agent-catalog.py
+    python3 Scripts/generate-ai-agent-catalog.py --from-existing
 
 Run it from the package root (the output path is resolved relative to this
 script, so any working directory works). Fetches
 https://raw.githubusercontent.com/ai-robots-txt/ai.robots.txt/main/robots.json
 and rewrites Sources/SwiftlyBotKit/Catalog/AIAgentCatalogData.swift.
+
+`--from-existing` skips the fetch and re-runs only the clean-up below over the
+rows already in AIAgentCatalogData.swift, so a change to the overrides or the
+clean-up rules can land without pulling in new upstream data.
+
+Upstream is a robots.txt list, and the matcher reads user-agent headers, so
+every row is cleaned up before it is written:
+
+- A trailing version (`MistralAI-User/1.0`, `Brightbot 1.0`) is stripped. The
+  matcher wants the product name; the version changes and the purpose must not.
+- Tokens are deduplicated case-insensitively (`meta-externalagent` and
+  `Meta-ExternalAgent` are one agent). The hand-audited spelling wins, and
+  known values (operator, robots.txt stance) fill in unknown ones.
+- NOT_IN_USER_AGENTS drops tokens too generic to identify an AI agent in a
+  user-agent header, even as a whole word (`Spider`, `Code`).
 
 Upstream's `function` field is free text: around 70 distinct values across 175
 agents, and the agents that matter most (GPTBot, ClaudeBot, PerplexityBot,
@@ -55,7 +71,7 @@ PURPOSE_OVERRIDES = {
     "PerplexityBot": "aiSearch",
     "Amazonbot": "aiSearch",
     "Applebot": "aiSearch",
-    "MistralAI-User": "aiSearch",
+    "MistralAI-User": "userTriggered",  # Le Chat fetching a page a user asked about
     "YouBot": "aiSearch",
     "phindbot": "aiSearch",
     "Devin": "agent",
@@ -69,7 +85,20 @@ PURPOSE_OVERRIDES = {
     "DuckAssistBot": "userTriggered",
     "Gemini-Deep-Research": "userTriggered",
     "Google-CloudVertexBot": "training",
+    "meta-externalfetcher": "userTriggered",
 }
+
+# Valid robots.txt groups upstream, but as whole words in a user-agent header
+# they match ordinary non-AI software, which would inflate every AI number.
+NOT_IN_USER_AGENTS = {
+    "Spider": "matches every search-engine crawler that calls itself a spider "
+              "(Sogou web spider, Screaming Frog SEO Spider)",
+    "Code": "matches VS Code and every other Electron app built on it (Code/1.93.1)",
+}
+
+# A trailing product version, as upstream sometimes lists the full product
+# token rather than the name: `MistralAI-User/1.0`, `Brightbot 1.0`.
+VERSION_SUFFIX = re.compile(r"[/ ]v?\d+(\.\d+)*$")
 
 # Upstream's newer, consistent labels.
 TAXONOMY = {
@@ -128,23 +157,98 @@ def clean_respect(raw):
     return "unknown"
 
 
-def main():
+def normalize(records):
+    """Strips versions, drops generic tokens and merges case-insensitive duplicates.
+
+    `records` is a list of dicts with name, purpose, operator, respect, how.
+    """
+    dropped, merged, stripped = [], [], []
+    by_key = {}
+    override_keys = {name.lower(): name for name in PURPOSE_OVERRIDES}
+    for record in records:
+        name = record["name"]
+        bare = VERSION_SUFFIX.sub("", name)
+        if bare != name:
+            stripped.append(f"{name} -> {bare}")
+            record = dict(record, name=bare)
+            name = bare
+        if name in NOT_IN_USER_AGENTS:
+            dropped.append(f"{name}: {NOT_IN_USER_AGENTS[name]}")
+            continue
+        key = name.lower()
+        if key in by_key:
+            merged.append(f"{by_key[key]['name']} + {name}")
+            by_key[key] = merge(by_key[key], record, override_keys.get(key))
+        else:
+            by_key[key] = record
+
+    rows = []
+    for record in by_key.values():
+        # Exact spelling, as in purpose_for: an override is applied only to
+        # the row it was written for.
+        if record["name"] in PURPOSE_OVERRIDES:
+            record = dict(record, purpose=PURPOSE_OVERRIDES[record["name"]], how="override")
+        rows.append(record)
+    rows.sort(key=lambda r: (r["name"].lower(), r["name"]))
+    return rows, dropped, merged, stripped
+
+
+def merge(a, b, audited_name):
+    """Two spellings of one agent. The hand-audited spelling's row leads; the
+    other only fills in what the leader does not know."""
+    if audited_name and b["name"] == audited_name and a["name"] != audited_name:
+        a, b = b, a
+    elif not audited_name and (b["name"].lower(), b["name"]) < (a["name"].lower(), a["name"]):
+        a, b = b, a
+    result = dict(a)
+    if result["operator"] == "Unknown" and b["operator"] != "Unknown":
+        result["operator"] = b["operator"]
+    if result["respect"] == "unknown" and b["respect"] != "unknown":
+        result["respect"] = b["respect"]
+    return result
+
+
+def fetch_records():
     with urllib.request.urlopen(SOURCE) as response:
         agents = json.load(response)
-
-    rows, stats = [], {"override": 0, "taxonomy": 0, "keyword": 0, "fallback": 0}
-    for name in sorted(agents, key=str.lower):
+    records = []
+    for name in agents:
         entry = agents[name]
         # Tabs and newlines would break the TSV; no upstream value has them today.
         if "\t" in name or "\n" in name:
             print(f"skipping {name!r}: contains a separator", file=sys.stderr)
             continue
         purpose, how = purpose_for(name, entry)
-        stats[how] += 1
-        rows.append("\t".join([name, purpose, clean_operator(entry.get("operator")),
-                               clean_respect(entry.get("respect"))]))
+        records.append({"name": name, "purpose": purpose, "how": how,
+                        "operator": clean_operator(entry.get("operator")),
+                        "respect": clean_respect(entry.get("respect"))})
+    return records
 
-    body = "\n".join(rows)
+
+def existing_records():
+    with open(OUTPUT) as handle:
+        text = handle.read()
+    body = text.split('static let tsv = """\n', 1)[1].rsplit('\n"""', 1)[0]
+    records = []
+    for line in body.split("\n"):
+        columns = line.split("\t")
+        if len(columns) != 4:
+            continue
+        name, purpose, operator, respect = columns
+        records.append({"name": name, "purpose": purpose, "how": "existing",
+                        "operator": operator, "respect": respect})
+    return records
+
+
+def main():
+    from_existing = "--from-existing" in sys.argv[1:]
+    records = existing_records() if from_existing else fetch_records()
+    rows, dropped, merged, stripped = normalize(records)
+
+    stats = {"override": 0, "taxonomy": 0, "keyword": 0, "fallback": 0, "existing": 0}
+    for row in rows:
+        stats[row["how"]] += 1
+    body = "\n".join("\t".join([r["name"], r["purpose"], r["operator"], r["respect"]]) for r in rows)
     swift = f'''// Generated by Scripts/generate-ai-agent-catalog.py. Do not edit by hand.
 //
 // Source: {SOURCE}
@@ -152,7 +256,8 @@ def main():
 //
 // Columns, tab separated: user-agent token, purpose, operator, respects robots.txt.
 // Purpose is OUR classification, not upstream's: see the script for how each row
-// was decided and which agents are hand-audited.
+// was decided and which agents are hand-audited. Versions are stripped, case
+// variants merged and user-agent-generic tokens dropped: see the script.
 
 enum AIAgentCatalogData {{
     /// One agent per line. Parsed once, lazily, by `AIAgentCatalog`.
@@ -164,11 +269,21 @@ enum AIAgentCatalogData {{
     with open(OUTPUT, "w") as handle:
         handle.write(swift)
 
-    print(f"wrote {OUTPUT_RELATIVE}: {len(rows)} agents")
+    print(f"wrote {OUTPUT_RELATIVE}: {len(rows)} agents"
+          + (" (re-cleaned from the existing file, nothing fetched)" if from_existing else ""))
+    for line in stripped:
+        print(f"  version stripped       : {line}")
+    for line in merged:
+        print(f"  case duplicate merged  : {line}")
+    for line in dropped:
+        print(f"  dropped, too generic   : {line}")
     print(f"  hand-audited overrides : {stats['override']}")
-    print(f"  upstream taxonomy      : {stats['taxonomy']}")
-    print(f"  keyword guess          : {stats['keyword']}")
-    print(f"  unclassified fallback  : {stats['fallback']}  <- review these")
+    if from_existing:
+        print(f"  kept as already classified: {stats['existing']}")
+    else:
+        print(f"  upstream taxonomy      : {stats['taxonomy']}")
+        print(f"  keyword guess          : {stats['keyword']}")
+        print(f"  unclassified fallback  : {stats['fallback']}  <- review these")
 
 
 if __name__ == "__main__":

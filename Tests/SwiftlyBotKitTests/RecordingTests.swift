@@ -16,6 +16,25 @@ final class LLMReferrerTests: XCTestCase {
         XCTAssertNil(LLMReferrer.platform(forReferer: nil))
     }
 
+    /// Developer and company sites are not assistants: a reader following a
+    /// link from the API docs was not referred by an answer.
+    func testDeveloperSitesAreNotAssistantReferrals() {
+        for referer in ["https://platform.openai.com/docs", "https://openai.com/", "https://docs.claude.com/en/docs",
+                        "https://www.claude.com/", "https://x.ai/api", "https://docs.x.ai/"] {
+            XCTAssertNil(LLMReferrer.platform(forReferer: referer), referer)
+        }
+        XCTAssertEqual(LLMReferrer.platform(forReferer: "https://grok.com/c/1"), "Grok")
+    }
+
+    /// Android apps send `android-app://<package>/` rather than a web origin.
+    func testAndroidAppReferrers() {
+        XCTAssertEqual(LLMReferrer.platform(forReferer: "android-app://com.openai.chatgpt/"), "ChatGPT")
+        XCTAssertEqual(LLMReferrer.platform(forReferer: "android-app://com.anthropic.claude"), "Claude")
+        XCTAssertEqual(LLMReferrer.platform(forReferer: "android-app://ai.perplexity.app.android/"), "Perplexity")
+        XCTAssertNil(LLMReferrer.platform(forReferer: "android-app://com.google.android.gm/"))
+        XCTAssertNil(LLMReferrer.platform(forReferer: "android-app://evil.com.openai.chatgpt/"), "packages match exactly")
+    }
+
     /// Suffix matching must not let `notchatgpt.com` or `chatgpt.com.evil.test`
     /// through: it is a host match, not a substring one.
     func testLookalikeHostsAreNotMatched() {
@@ -51,6 +70,12 @@ final class RecorderFilterTests: XCTestCase {
     func testStillRecordsRobotsAndSitemap() {
         XCTAssertTrue(classifier.isWorthRecording(path: "/robots.txt", userAgent: gptbot, referer: nil))
         XCTAssertTrue(classifier.isWorthRecording(path: "/sitemap.xml", userAgent: gptbot, referer: nil))
+    }
+
+    func testStoredStringsFitPostgreSQLText() {
+        XCTAssertEqual(BotTrafficRecorder.storable("a\u{0}b"), "ab")
+        XCTAssertEqual(BotTrafficRecorder.storable(String(repeating: "é", count: 600)).unicodeScalars.count, 512)
+        XCTAssertEqual(BotTrafficRecorder.storable("abc", limit: 2), "ab")
     }
 
     func testDoesNotRecordItsOwnDashboard() {

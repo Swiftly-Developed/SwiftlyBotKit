@@ -19,10 +19,35 @@ swift build
 swift test
 ```
 
-The tests do not need a database. They cover classification, IP range
-matching, configuration, client IP extraction and dashboard rendering, and the
-end-to-end dashboard route tests run without writing any rows. You need
-PostgreSQL only to run the example app or your own app against the package.
+`swift test` does not need a database. The unit tests cover classification,
+IP range matching, configuration, client IP extraction and dashboard
+rendering, and the end-to-end dashboard route tests run without writing any
+rows.
+
+### Integration tests (PostgreSQL)
+
+`Tests/SwiftlyBotKitIntegrationTests` runs the migration, the recorder and the
+dashboard's SQL against a real PostgreSQL: time-zone bucketing across DST
+changes, injection attempts, a non-default `DatabaseID`, and timings over
+50,000 rows. Every test skips unless `BOTKIT_TEST_DATABASE_URL` is set, so a
+plain `swift test` still needs nothing. To run them:
+
+```bash
+docker run -d --rm --name botkit-it-pg \
+  -e POSTGRES_USER=botkit -e POSTGRES_PASSWORD=botkit -e POSTGRES_DB=botkit \
+  -p 55432:5432 postgres:16
+
+BOTKIT_TEST_DATABASE_URL='postgres://botkit:botkit@localhost:55432/botkit?sslmode=disable' \
+  swift test --filter SwiftlyBotKitIntegrationTests
+
+docker stop botkit-it-pg
+```
+
+Each test works in its own throwaway schema and drops it afterwards, so any
+database you can create schemas in will do. The PostgreSQL driver is a
+test-only dependency: the library target does not link it. CI runs the same
+tests against PostgreSQL 13 and 16. Lines starting `BOTKIT-PERF` and
+`BOTKIT-TZ` in the output are the timings, query plans and time-zone notes.
 
 If the tests fail to load with an `_swift_initBorrow` error at `dlopen`, your
 resolved swift-collections has drifted. Pin it and retry:

@@ -3,7 +3,7 @@
 AI agent traffic tracking for [Vapor](https://vapor.codes) apps, with a
 password-protected dashboard that reads it back.
 
-Add it to a Vapor app and every request is checked against a catalog of 175
+Add it to a Vapor app and every request is checked against a catalog of 167
 known AI agents. Matches are recorded in PostgreSQL along with what the agent
 was doing (training a model, indexing for AI search, or fetching a page because
 someone asked an assistant a question) and whether its IP address really
@@ -30,15 +30,16 @@ breakdown is what this package records and shows.
 
 ## Features
 
-- Classifies every request against a built-in catalog of 175 AI agents,
+- Classifies every request against a built-in catalog of 167 AI agents,
   generated from the community [ai.robots.txt](https://github.com/ai-robots-txt/ai.robots.txt) list.
 - Records what each agent was doing: `training`, `aiSearch`, `userTriggered`,
   `agent` or `scraper`.
 - Verifies OpenAI, Anthropic and Perplexity agents against the IP ranges those
   operators publish, and stores each visit as `verified`, `unverified` or
   `spoofed`.
-- Records human visitors referred by 16 AI assistant hosts (ChatGPT, Claude,
-  Perplexity, Gemini, Copilot, Grok, Le Chat and others).
+- Records human visitors referred by AI assistants (ChatGPT, Claude,
+  Perplexity, Gemini, Copilot, Grok, Le Chat and others), on the web and from
+  their Android apps.
 - Never delays a response: classification is one in-memory lookup, and the
   database write happens in a detached task.
 - Never records ordinary human traffic or static assets. `robots.txt` and
@@ -144,8 +145,9 @@ dashboard is not mounted (the path answers 404) and recording continues.
 `BotKit.install(on:config:)` is shorthand for `BotKit.configure(for:database:)` (the
 migration) followed by `BotKit.configureRoutes(for:config:)` (the middleware
 and dashboard). Call the two separately if your app registers migrations and
-routes in different places, and do not call `install` as well, or the
-migration is registered twice.
+routes in different places. Calling `install` as well throws
+`BotKitConfigurationError.alreadyInstalled` at boot, so a double setup cannot
+record every hit twice.
 
 Recording writes to `app.db`, the app's default database.
 
@@ -153,9 +155,11 @@ Recording writes to `app.db`, the app's default database.
 
 Each recorded row is classified on three axes.
 
-**1. Which agent.** The user agent is matched against the catalog, longest
-token first, because `Applebot-Extended` contains `Applebot` and the two mean
-different things.
+**1. Which agent.** The user agent is matched against the catalog. A token
+counts only as a whole word (`Spider` does not match `Baiduspider`), and the
+longest matching token wins, because `Applebot-Extended` contains `Applebot`
+and the two mean different things. Between equally long tokens, a custom agent
+beats a built-in one, then the token earliest in the header wins.
 
 **2. What it was doing.** `AIAgentPurpose`:
 
@@ -165,7 +169,7 @@ different things.
 | `aiSearch` | Indexing the page so it can be cited in AI answers. | OAI-SearchBot, Claude-SearchBot, PerplexityBot |
 | `userTriggered` | A person asked an assistant something, and it fetched the page to answer. | ChatGPT-User, Claude-User, Perplexity-User |
 | `agent` | An autonomous or coding agent working on a task. | Devin |
-| `scraper` | Harvesting for datasets, resale or image corpora. | Diffbot, ImageSift |
+| `scraper` | Harvesting for datasets, resale or image corpora. | Brightbot, FirecrawlAgent |
 
 The operators draw these lines themselves by using separate user agents for
 each job, so the split is theirs rather than a guess. The upstream list
@@ -196,9 +200,12 @@ stored as `unverified`.
 
 **AI referrals.** A request whose `Referer` is a known assistant host
 (`chatgpt.com`, `claude.ai`, `perplexity.ai` and others in
-`LLMReferrer.builtInPlatforms`) is stored in the same table with the platform
-name set and no agent. These are people who clicked a link in an AI answer.
-Consent-gated analytics often miss them.
+`LLMReferrer.builtInPlatforms`), or an assistant's Android app
+(`android-app://com.openai.chatgpt/`), is stored in the same table with the
+platform name set and no agent. These are people who clicked a link in an AI
+answer. Consent-gated analytics often miss them. Developer and company sites
+(`platform.openai.com`, `docs.claude.com`, `x.ai`) are deliberately not on the
+list: a link followed from API docs is not an assistant referral.
 
 ## Configuration
 
@@ -220,7 +227,7 @@ try BotKit.install(on: app, config: config)
 | Option | Default | Purpose |
 |---|---|---|
 | `siteKey` | every request is `"default"` | `(Request) -> String` naming the site a request belongs to. Stored on every row. |
-| `sites` | `[]` | `BotDashboardSite` entries for the dashboard's site switcher. Shown only with two or more. |
+| `sites` | `[]` | `BotDashboardSite` entries for the dashboard's site switcher. Shown only with two or more. The key `all` is reserved for the all-sites view and throws; a repeated key is logged and only its first entry is offered. |
 | `signingSecret` | `.environment("BOT_DASHBOARD_SECRET")` | HMAC key for session cookies and IP hashes. |
 | `clientIP` | `.lastForwardedFor` | How the client IP is read. See [Security](#security). |
 | `database` | `nil` | Which registered database holds the table. `nil` is the app's default database, so no separate database is needed. |
@@ -232,7 +239,8 @@ try BotKit.install(on: app, config: config)
 | `recordsAgents` | `true` | Record requests from known AI agents. |
 | `recordsReferrals` | `true` | Record humans arriving from AI assistants. |
 | `ignoredFileExtensions` | `Recording.defaultIgnoredFileExtensions` | Extensions never recorded: images, fonts, CSS, JS, video, `pdf`, `zip`. `txt` and `xml` are not in the list. |
-| `excludedPathPrefixes` | `[]` | Path prefixes never recorded. The dashboard's own path is always excluded. |
+| `excludedPathPrefixes` | `[]` | Path prefixes never recorded. Plain string prefixes: `/health` also excludes `/health-insurance/`, so end a prefix with `/` to exclude only a directory. The dashboard's own path, and everything below it, is always excluded. |
+| `maximumPendingWrites` | `256` | Recording writes allowed in flight at once. Beyond it, visits are dropped with a sampled warning, so a slow database under a crawler burst cannot grow memory without bound. |
 
 When both `recordsAgents` and `recordsReferrals` are `false`, the middleware
 is not installed.
@@ -263,19 +271,24 @@ is not installed.
 | `username` | `.environment("BOT_DASHBOARD_USER")` | Sign-in username. |
 | `password` | `.environment("BOT_DASHBOARD_PASSWORD")` | Sign-in password. |
 | `title` | `AI bot traffic` | Heading and page title. |
-| `timeZone` | `.utc` | Zone every hourly and daily bucket is drawn in. A `BotKitTimeZone` case per IANA zone, such as `.americaNewYork`. |
+| `timeZone` | `.utc` | Zone every hourly and daily bucket is drawn in. A `BotKitTimeZone` case per canonical IANA zone, such as `.americaNewYork`. |
 | `dateRanges` | all `BotDateRange` cases | Range pills offered: `.day` (24h), `.week` (7d), `.month` (30d), `.quarter` (90d). |
 | `defaultDateRange` | `.week` | Range shown when the URL names none. |
 | `sessionCookieName` | `botkit_dashboard` | Session cookie name. |
 | `sessionLifetime` | 12 hours | How long a sign-in lasts. |
 | `secureCookies` | `.automatic` | When the cookie is `Secure`: `.automatic`, `.always` or `.never`. |
-| `loginLimit` | 5 failures per 15 minutes | `LoginLimit(maximumFailures:window:)`, per client, in memory. |
+| `loginLimit` | 5 failures per 15 minutes | `LoginLimit(maximumFailures:window:)`, per client (IPv6 per /64), in memory. A process-wide ceiling of 50 failures per window applies on top. |
 
 The dashboard is mounted only when both `username` and `password` resolve to
-non-empty values. For a zone the `BotKitTimeZone` list lacks, use
-`.custom(TimeZone(identifier: "...")!)` with an IANA identifier; avoid
-fixed-offset `TimeZone(secondsFromGMT:)` zones, whose `GMT+0100` style names
-PostgreSQL reads with the opposite sign.
+values that are not empty or only whitespace. For a zone the `BotKitTimeZone` list lacks, use
+`.custom(TimeZone(identifier: "...")!)`; a fixed offset such as
+`.custom(TimeZone(secondsFromGMT: 3600)!)` works too, without daylight saving
+time. Buckets are local wall-clock hours and days computed in Swift, and
+PostgreSQL is only sent their boundaries, never the zone name. A repeated hour
+when clocks go back is one bucket. Legacy names such as `.asiaCalcutta` are
+deprecated aliases of the canonical case (`.asiaKolkata`), and a zone newer
+than the host's tz database (`America/Coyhaique` on Swift 6.0 or 6.1 for Linux)
+is drawn in UTC.
 
 ### Values from the environment or code
 
@@ -346,22 +359,55 @@ as `verified`. Pick the `ClientIPStrategy` that matches your deployment:
 | `.remoteAddress` | The app faces the internet directly. |
 | `.custom { req in ... }` | Your proxy puts the client address in another header, such as `CF-Connecting-IP` or `Fly-Client-IP`. |
 
+In one line: **one proxy, the default; `n` proxies, `.forwardedFor(trustedProxies: n)`;
+no proxy, `.remoteAddress`; a proxy with its own header, `.custom`.**
+
+> **Exposed directly? Use `.remoteAddress`.** The default reads
+> `X-Forwarded-For` whoever sent it, because it assumes a proxy that appends
+> the address it saw. An app that clients can reach without passing through
+> that proxy (no proxy at all, or a platform hostname that bypasses your CDN)
+> lets a client write the last entry itself: it can then claim an operator's
+> address and be counted as `verified`, and reset the login limiter on every
+> attempt. Use `.remoteAddress` there, or lock the origin to the proxy.
+
 If the strategy does not match your proxies, `verified` and `spoofed` counts
 cannot be trusted, and neither can the login limiter, which is keyed on the
-same address.
+same address. Entries such as `1.2.3.4:5678` or `[2600::5]:443`, which some
+proxies write, are read as the bare address.
 
 **Dashboard credentials.** Use a long random password. Failed sign-ins are
-limited per client IP (five per fifteen minutes by default), in memory and per
-process, so several instances each keep their own count. Username and password
-are always both compared. Keep `dashboard.path` under a path your `robots.txt`
-disallows; both dashboard pages also send `X-Robots-Tag: noindex`.
+limited per client IP (five per fifteen minutes by default, IPv6 grouped by
+/64), in memory and per process, so several instances each keep their own
+count. A process-wide ceiling (`loginLimit.globalMaximumFailures`, 50 failures per window by default) sits on top, so forged
+client addresses cannot buy unlimited guesses; when it trips, every sign-in,
+the owner's included, is refused until the window passes, and a `critical`
+line is logged. Username and password are always both compared. Keep
+`dashboard.path` under a path your `robots.txt` disallows.
+
+**Sessions.** The session cookie is signed, stateless, bound to the dashboard
+username and password, and scoped to the dashboard path (`HttpOnly`,
+`SameSite=Lax`). Earlier versions set it with `Path=/`: sign-in and sign-out
+also expire that one, and a valid token is accepted whichever of the
+same-named cookies carries it. Changing the password signs every session out. Signing out
+only clears the browser's cookie: a copy taken earlier stays valid until it
+expires, so change the password if a cookie may have leaked. Sign-in and
+sign-out refuse cross-site requests (by `Origin` and `Sec-Fetch-Site`), and
+every dashboard response sends `no-store`, `X-Frame-Options: DENY`,
+`nosniff`, `Referrer-Policy: no-referrer`, `noindex` and a
+`Content-Security-Policy` that allows no script.
 
 **Signing secret.** Set `BOT_DASHBOARD_SECRET` in production to a long random
 value, and keep it stable. It signs the stateless session cookie, so anyone who
-has it can mint a session. It also keys the IP hash, so changing it means new
+has it can mint a session; a secret shorter than 32 bytes is logged as a
+warning. It also keys the IP hash, so changing it means new
 rows no longer match old ones when counting distinct clients. The session
 cookie is `Secure` over HTTPS by default, including behind a proxy that sets
 `X-Forwarded-Proto: https`.
+
+**Stored data.** Rows hold the path, user agent, referring assistant
+platform and a keyed hash of the client IP. That hash is pseudonymous personal
+data, and nothing is deleted automatically; see the data protection section of
+[SECURITY.md](SECURITY.md) for a retention query.
 
 To report a vulnerability, see [SECURITY.md](SECURITY.md).
 

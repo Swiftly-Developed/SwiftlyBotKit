@@ -1,4 +1,4 @@
-# Configuration
+# Configuring SwiftlyBotKit
 
 Every option SwiftlyBotKit accepts, what it defaults to, and how to set it.
 
@@ -40,7 +40,7 @@ try BotKit.install(on: app, config: config)
 
 Credentials and the signing secret are ``BotKitConfigValue`` values. Each is either ``BotKitConfigValue/environment(_:)``, read from an environment variable, or ``BotKitConfigValue/value(_:)``, a literal. A string literal is a direct value, so `config.dashboard.username = "owner"` works.
 
-Values are resolved when ``BotKit/configureRoutes(for:config:)`` runs, not when the struct is built, and an empty string counts the same as an unset variable.
+Values are resolved when ``BotKit/configureRoutes(for:config:)`` runs, not when the struct is built. Surrounding whitespace and newlines are trimmed, so a secret pasted with a trailing newline works, and an empty or whitespace-only value counts the same as an unset variable.
 
 ```swift
 // Defaults: read from BOT_DASHBOARD_USER, BOT_DASHBOARD_PASSWORD, BOT_DASHBOARD_SECRET.
@@ -104,7 +104,10 @@ When it resolves to nothing, a random key is generated per process and a warning
 | ``BotKitConfiguration/Recording/recordsAgents`` | `true` | Record requests whose user agent matches a known AI agent |
 | ``BotKitConfiguration/Recording/recordsReferrals`` | `true` | Record humans arriving with a `Referer` from a known AI assistant |
 | ``BotKitConfiguration/Recording/ignoredFileExtensions`` | ``BotKitConfiguration/Recording/defaultIgnoredFileExtensions`` | Lowercased extensions, without the dot, that are never recorded |
-| ``BotKitConfiguration/Recording/excludedPathPrefixes`` | empty | Path prefixes that are never recorded |
+| ``BotKitConfiguration/Recording/excludedPathPrefixes`` | empty | Path prefixes that are never recorded, compared as plain strings |
+| ``BotKitConfiguration/Recording/maximumPendingWrites`` | `256` | Recording writes allowed in flight; beyond it, visits are dropped with a sampled warning |
+
+Excluded prefixes are plain string prefixes, not path segments: `/health` also excludes `/health-insurance/`. End a prefix with `/` (`/health/`) to exclude only what sits below it.
 
 The default ignored extensions are images, fonts, stylesheets, scripts, video, PDF and ZIP. `.txt` and `.xml` are deliberately absent, because a crawler fetching `robots.txt` or `sitemap.xml` is a real signal. The dashboard's own path is always excluded, whether or not the dashboard is mounted.
 
@@ -189,7 +192,7 @@ config.clientIP = .forwardedFor(trustedProxies: 2)
 | ``BotKitConfiguration/Dashboard/sessionCookieName`` | `botkit_dashboard` | Session cookie name |
 | ``BotKitConfiguration/Dashboard/sessionLifetime`` | 12 hours | How long a sign-in lasts |
 | ``BotKitConfiguration/Dashboard/secureCookies`` | ``BotKitConfiguration/SecureCookiePolicy/automatic`` | When the cookie is `Secure` |
-| ``BotKitConfiguration/Dashboard/loginLimit`` | 5 failures per 15 minutes | Failed sign-in throttle |
+| ``BotKitConfiguration/Dashboard/loginLimit`` | 5 failures per client, 50 in total, per 15 minutes | Failed sign-in throttle |
 
 The dashboard is mounted only when both ``BotKitConfiguration/Dashboard/username`` and ``BotKitConfiguration/Dashboard/password`` resolve to non-empty values. ``BotKitConfiguration/Dashboard/normalizedPath`` gives the path with one leading slash and no trailing slash, whatever form you wrote it in.
 
@@ -205,7 +208,9 @@ config.dashboard.defaultDateRange = .month
 
 Keep the path under something your `robots.txt` disallows. Both dashboard pages also send `X-Robots-Tag: noindex, nofollow`.
 
-``BotKitTimeZone`` has a case for every IANA zone, named after its identifier (`America/New_York` is `.americaNewYork`), so the zone comes from autocomplete rather than a string. Each case's identifier is handed to PostgreSQL by name. ``BotKitTimeZone/custom(_:)`` takes any Foundation `TimeZone` for a zone the list lacks; avoid a fixed-offset `TimeZone(secondsFromGMT:)`, whose `GMT+0100` style identifier PostgreSQL reads with the opposite (POSIX) sign.
+Each path segment is taken literally and may use only letters, digits, `-`, `.`, `_` and `~`. The root path `/` is refused (the dashboard would take over the app's own `/`, `/login` and `/logout`), and so are `.` and `..` segments, a segment starting with `:` or `*`, spaces, `?`, `%` and non-ASCII characters. ``BotKit/configureRoutes(for:config:)`` throws ``BotKitConfigurationError/invalidDashboardPath(_:reason:)`` with the reason, rather than mounting a dashboard that cannot be reached.
+
+``BotKitTimeZone`` has a case for every canonical IANA zone, named after its identifier (`America/New_York` is `.americaNewYork`), so the zone comes from autocomplete rather than a string. Legacy spellings such as `.asiaCalcutta` are deprecated aliases of the canonical case (`.asiaKolkata`), and ``BotKitTimeZone/init(identifier:)`` maps legacy names the same way. ``BotKitTimeZone/custom(_:)`` takes any Foundation `TimeZone`, including a fixed offset such as `TimeZone(secondsFromGMT: 3600)`: bucketing happens in Swift and PostgreSQL never sees the zone. A zone the host's tz database lacks falls back to UTC; see <doc:TheDashboard>.
 
 #### Sessions and sign-in
 
@@ -218,7 +223,13 @@ config.dashboard.loginLimit = .init(maximumFailures: 3, window: 30 * 60)
 
 ``BotKitConfiguration/SecureCookiePolicy/automatic`` marks the cookie `Secure` when `X-Forwarded-Proto` is `https` or the request URL's scheme is https, which covers TLS terminated at a proxy. Use ``BotKitConfiguration/SecureCookiePolicy/never`` only for local development over plain HTTP.
 
-``BotKitConfiguration/LoginLimit`` counts failures in memory, per process, keyed on a hash of the client IP. With several instances, each keeps its own count.
+The cookie name must be an RFC 6265 token: visible ASCII without spaces or any of `()<>@,;:\"/[]?={}`. Anything else throws ``BotKitConfigurationError/invalidSessionCookieName(_:)``, since the browser would not send the cookie back as set.
+
+``BotKitConfiguration/LoginLimit`` counts failures in memory, per process, keyed on a hash of the client IP. With several instances, each keeps its own count. ``BotKitConfiguration/LoginLimit/globalMaximumFailures`` (default 50) caps failures from every client together; when it trips, every sign-in is refused until the window passes.
+
+```swift
+config.dashboard.loginLimit = .init(maximumFailures: 3, window: 30 * 60, globalMaximumFailures: 20)
+```
 
 #### Disabling the dashboard
 

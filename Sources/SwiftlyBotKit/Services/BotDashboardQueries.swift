@@ -70,26 +70,27 @@ struct BotDashboardData: Sendable {
 /// Every aggregate the dashboard shows.
 ///
 /// **PostgreSQL only.** The queries use `COUNT(*) FILTER (WHERE …)`,
-/// `date_trunc`, `AT TIME ZONE`, `BOOL_AND` and `::text` casts.
+/// `width_bucket` over a `timestamptz[]`, `BOOL_AND` and `::text` casts.
 ///
 /// Raw SQL rather than Fluent: all five are `GROUP BY` with `FILTER` clauses,
 /// which Fluent's query builder cannot express, and doing it in Swift would
 /// mean pulling ninety days of rows into memory to count them.
 ///
-/// The only interpolated values are the window start, the site key, the
-/// bucket unit and the time zone name, all bound. The enum labels in the `FILTER` clauses are literals from our own
+/// The only interpolated values are the window start, the bucket
+/// boundaries and the site key, all bound. The enum labels in the `FILTER` clauses are literals from our own
 /// source, never from the request.
 struct BotDashboardQueries: Sendable {
     let database: any SQLDatabase
-    /// Bucket boundaries on the SQL side. Must be the zone the Swift-side
-    /// bucket list is built in, or every bar shifts by the offset between them.
+    /// The zone every bucket boundary is computed in, on the Swift side only.
+    /// PostgreSQL is handed instants, never this zone's name.
     let timeZone: TimeZone
 
     func load(range: BotDateRange, siteKey: String?, now: Date = Date()) async throws -> BotDashboardData {
-        let since = range.start(from: now, in: timeZone)
+        let window = range.window(now: now, in: timeZone)
+        let since = window.start
         var data = BotDashboardData()
         data.totals = try await totals(since: since, siteKey: siteKey)
-        data.series = try await series(range: range, since: since, siteKey: siteKey, now: now)
+        data.series = try await series(window: window, siteKey: siteKey)
         data.topAgents = try await topAgents(since: since, siteKey: siteKey)
         data.topPages = try await topPages(since: since, siteKey: siteKey)
         data.referrals = try await referrals(since: since, siteKey: siteKey)
@@ -124,44 +125,45 @@ struct BotDashboardQueries: Sendable {
     }
 
     private func series(
-        range: BotDateRange,
-        since: Date,
-        siteKey: String?,
-        now: Date
+        window: BotDateRange.Window,
+        siteKey: String?
     ) async throws -> [BotDashboardData.SeriesPoint] {
-        // `AT TIME ZONE` twice on purpose: the first converts the stored
-        // instant to local wall-clock time to find the local boundary, the
-        // second turns that boundary back into an instant so it decodes as the
-        // same `Date` the Swift-side bucket list holds. Dropping either one
-        // shifts every bar by the UTC offset.
-        let zone = timeZone.identifier
+        // PostgreSQL does not bucket by time zone at all. Swift computed every
+        // run of constant local wall-clock hour or day; `width_bucket` returns
+        // which run a row falls in (1-based, thresholds ascending). No zone
+        // name, `AT TIME ZONE` or tzdata on the server is involved, so the two
+        // sides cannot disagree about DST, legacy names or fixed offsets.
+        //
+        // A NULL purpose (a row written by something other than this package)
+        // is charted as `scraper`, the catalog's own fallback for an agent it
+        // cannot classify, so the chart sums to the same total as the tile.
+        let thresholds = window.runs.map(\.start)
         var query: SQLQueryString = """
         SELECT
-            date_trunc(\(bind: range.truncation), created_at AT TIME ZONE \(bind: zone))
-                AT TIME ZONE \(bind: zone) AS bucket,
-            purpose::text AS purpose,
+            width_bucket(created_at, \(bind: thresholds)::timestamptz[]) AS run,
+            COALESCE(purpose::text, 'scraper') AS purpose,
             COUNT(*) AS count
         FROM ai_bot_visits
-        WHERE created_at >= \(bind: since) AND agent_name IS NOT NULL
+        WHERE created_at >= \(bind: window.start) AND agent_name IS NOT NULL
         """
         query += siteClause(siteKey)
-        query += " GROUP BY 1, 2 ORDER BY 1"
+        query += " GROUP BY 1, 2"
 
-        let rows = try await database.raw(query).all()
-        var byBucket: [Date: [AIAgentPurpose: Int]] = [:]
-        for row in rows {
-            guard let bucket = try? row.decode(column: "bucket", as: Date.self),
+        var counts = Array(repeating: [AIAgentPurpose: Int](), count: window.buckets.count)
+        for row in try await database.raw(query).all() {
+            guard let run = try? row.decode(column: "run", as: Int.self),
+                  (1...window.runs.count).contains(run),
                   let raw = try? row.decode(column: "purpose", as: String.self),
                   let purpose = AIAgentPurpose(rawValue: raw),
                   let count = try? row.decode(column: "count", as: Int.self)
             else { continue }
-            byBucket[bucket, default: [:]][purpose, default: 0] += count
+            counts[window.runs[run - 1].bucket][purpose, default: 0] += count
         }
 
         // Driven by the generated bucket list, not by the rows, so quiet
         // periods stay visible as gaps in the chart.
-        return range.buckets(now: now, in: timeZone).map { bucket in
-            .init(bucket: bucket, counts: byBucket[bucket] ?? [:])
+        return zip(window.buckets, counts).map { bucket, counts in
+            .init(bucket: bucket.start, counts: counts)
         }
     }
 

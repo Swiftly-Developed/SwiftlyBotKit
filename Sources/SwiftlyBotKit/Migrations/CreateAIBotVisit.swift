@@ -1,8 +1,29 @@
 import Fluent
 import FluentSQL
 
+/// The table, its two enum types and its indexes.
+///
+/// Both directions run in one transaction. PostgreSQL's DDL is transactional,
+/// so a failure halfway (say, an app already owns a `bot_verification` type)
+/// rolls back the enum types created before it, and the migration can simply
+/// be retried once the blocker is gone. Names and indexes are frozen: apps
+/// have already run this migration, so a change needs a new migration.
 struct CreateAIBotVisit: AsyncMigration {
     func prepare(on database: Database) async throws {
+        try await database.transaction { database in
+            try await prepareSchema(on: database)
+        }
+    }
+
+    func revert(on database: Database) async throws {
+        try await database.transaction { database in
+            try await database.schema("ai_bot_visits").delete()
+            try await database.enum("bot_verification").delete()
+            try await database.enum("ai_agent_purpose").delete()
+        }
+    }
+
+    private func prepareSchema(on database: Database) async throws {
         let purpose = try await database.enum("ai_agent_purpose")
             .case("training")
             .case("aiSearch")
@@ -43,11 +64,5 @@ struct CreateAIBotVisit: AsyncMigration {
         try await sql.raw("CREATE INDEX IF NOT EXISTS idx_ai_bot_visits_time ON ai_bot_visits (created_at DESC)").run()
         // Top-agents and purpose breakdowns within a window.
         try await sql.raw("CREATE INDEX IF NOT EXISTS idx_ai_bot_visits_agent ON ai_bot_visits (agent_name, created_at DESC)").run()
-    }
-
-    func revert(on database: Database) async throws {
-        try await database.schema("ai_bot_visits").delete()
-        try await database.enum("bot_verification").delete()
-        try await database.enum("ai_agent_purpose").delete()
     }
 }

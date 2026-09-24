@@ -12,7 +12,7 @@ swift test                                   # no database needed
 BOTKIT_TEST_DATABASE_URL=postgres://... swift test   # adds the PostgreSQL integration tests
 swift package generate-documentation --target SwiftlyBotKit --warnings-as-errors
 python3 Scripts/generate-ai-agent-catalog.py  # refresh the agent catalog, then review the "unclassified fallback" count
-swift Scripts/generate-time-zones.swift       # regenerate BotKitTimeZone (run on macOS)
+swift Scripts/generate-time-zones.swift       # regenerate BotKitTimeZone from zone.tab and tzdata.zi (run on macOS)
 ```
 
 ## Layout
@@ -24,13 +24,16 @@ swift Scripts/generate-time-zones.swift       # regenerate BotKitTimeZone (run o
 
 ## Rules that are easy to break
 
-- **Client IP:** the default reads the *last* `X-Forwarded-For` entry. The first is attacker-controlled; reading it hands spoofers a `verified` badge.
+- **Client IP:** the default reads the *last* `X-Forwarded-For` entry. The first is attacker-controlled; reading it hands spoofers a `verified` badge. The default assumes one appending proxy; an app exposed directly must use `.remoteAddress`, and the docs must keep saying so. Whether to change the default is the owner's decision.
+- **Verification feeds (fetching):** every fetch carries a deadline and a size cap, a failed feed backs off (1 to 15 minutes) and keeps its old ranges, feeds naming the same agent are unioned, and prefixes broader than IPv4 /8 or IPv6 /16 are dropped. `app.client` is resolved lazily, never at install time.
+- **Address parsing:** `IPRange.parse` validates the string itself before `inet_pton` (no leading-zero octets, zone ids, NUL), so Darwin and Linux agree. Keep it that way.
+- **Configuration is validated at install:** `BotKitConfiguration.validate()` throws `BotKitConfigurationError` (dashboard path, cookie name, the reserved site key `all`), and a second install throws. Route segments are `.constant`.
 - **Verification feeds:** decode from raw bytes with `JSONDecoder`, never `response.content`. Some operators serve JSON as `application/octet-stream`.
 - **Recording never delays or alters the response.** The middleware does one synchronous catalog lookup and writes in a detached task.
-- **Time zones:** buckets are computed in Swift and PostgreSQL with the same IANA identifier. Never pass a fixed-offset zone; PostgreSQL inverts the `GMT+0100` sign.
+- **Time zones:** every bucket boundary is computed in Swift (`BotDateRange.window`) and sent to PostgreSQL as instants for `width_bucket`. Never hand PostgreSQL a zone name: its tz data can lack or disagree on a zone, and it reads `GMT+0100` with an inverted sign, in hours. `BotKitTimeZone` cases are the canonical `zone.tab` names; legacy names are deprecated aliases.
 - **HTML:** every database- or request-sourced string goes through `BotCharts.escape`. Charts are server-rendered SVG, no JavaScript.
 - **Chart colours** follow a fixed palette slot order that is part of the colourblind-safety design. Do not reorder.
-- **PostgreSQL only.** The migration creates enum types and the queries use `FILTER`, `date_trunc` and `AT TIME ZONE`. The library depends on FluentSQL/SQLKit, not the driver.
+- **PostgreSQL only.** The migration creates enum types (in one transaction) and the queries use `FILTER` and `width_bucket`. The library depends on FluentSQL/SQLKit, not the driver.
 
 ## Conventions
 

@@ -27,6 +27,7 @@ final class ConfigurationDefaultsTests: XCTestCase {
         XCTAssertTrue(recording.recordsReferrals)
         XCTAssertTrue(recording.isEnabled)
         XCTAssertEqual(recording.excludedPathPrefixes, [])
+        XCTAssertEqual(recording.maximumPendingWrites, 256)
         XCTAssertEqual(recording.ignoredFileExtensions, [
             "png", "jpg", "jpeg", "gif", "svg", "webp", "avif", "ico",
             "css", "js", "mjs", "map", "woff", "woff2", "ttf", "otf",
@@ -81,6 +82,7 @@ final class ConfigurationDefaultsTests: XCTestCase {
         XCTAssertEqual(dashboard.sessionLifetime, 12 * 60 * 60)
         XCTAssertEqual(dashboard.secureCookies, .automatic)
         XCTAssertEqual(dashboard.loginLimit, .init(maximumFailures: 5, window: 15 * 60))
+        XCTAssertEqual(dashboard.loginLimit.globalMaximumFailures, 50)
     }
 }
 
@@ -95,6 +97,12 @@ final class ConfigValueTests: XCTestCase {
     func testEmptyAndUnsetResolveToNil() {
         XCTAssertNil(BotKitConfigValue.value("").resolve())
         XCTAssertNil(BotKitConfigValue.environment("BOTKIT_TEST_\(UUID().uuidString)").resolve())
+    }
+
+    func testSurroundingWhitespaceIsTrimmed() {
+        XCTAssertEqual(BotKitConfigValue.value("  owner \n").resolve(), "owner")
+        XCTAssertEqual(BotKitConfigValue.value("pass word").resolve(), "pass word", "inner whitespace is kept")
+        XCTAssertNil(BotKitConfigValue.value(" \t\r\n").resolve())
     }
 
     func testEnvironmentIsReadAtResolveTime() {
@@ -164,6 +172,14 @@ final class ClientIPStrategyTests: XCTestCase {
     }
 
     /// Several header lines are one list, in order.
+    /// Ports and brackets some proxies add are removed from the chosen entry.
+    func testPortsAndBracketsAreStripped() throws {
+        XCTAssertEqual(ClientIPStrategy.lastForwardedFor.clientIP(for: try request(forwardedFor: "1.1.1.1, 1.2.3.4:5678")), "1.2.3.4")
+        XCTAssertEqual(ClientIPStrategy.lastForwardedFor.clientIP(for: try request(forwardedFor: "[2600::5]:443")), "2600::5")
+        XCTAssertEqual(ClientIPStrategy.lastForwardedFor.clientIP(for: try request(forwardedFor: "[2600::5]")), "2600::5")
+        XCTAssertEqual(ClientIPStrategy.lastForwardedFor.clientIP(for: try request(forwardedFor: "2600::5")), "2600::5")
+    }
+
     func testRepeatedHeadersAreOneList() throws {
         var headers = HTTPHeaders()
         headers.add(name: .xForwardedFor, value: "1.1.1.1")
@@ -379,6 +395,58 @@ final class DashboardConfigurationTests: XCTestCase {
         XCTAssertFalse(BotDashboardController.isSecure(policy: .never, headers: https, scheme: "https"))
     }
 
+    func testDuplicateDateRangesAreOfferedOnce() {
+        var dashboard = BotKitConfiguration.Dashboard()
+        dashboard.dateRanges = [.day, .week, .day, .week]
+        XCTAssertEqual(dashboard.offeredDateRanges, [.day, .week])
+    }
+
+    func testLoginLimitGlobalCeilingIsConfigurable() async throws {
+        let limit = BotKitConfiguration.LoginLimit(maximumFailures: 3, window: 60, globalMaximumFailures: 9)
+        let configured = await LoginAttemptLimiter(limit: limit).globalMaximumFailures
+        XCTAssertEqual(configured, 9)
+        // Never below the per-client limit.
+        let clamped = await LoginAttemptLimiter(limit: .init(maximumFailures: 20, globalMaximumFailures: 5)).globalMaximumFailures
+        XCTAssertEqual(clamped, 20)
+        let defaulted = await LoginAttemptLimiter().globalMaximumFailures
+        XCTAssertEqual(defaulted, 50)
+
+        var config = BotKitConfiguration(signingSecret: "limit-wiring-secret-that-is-long-enough")
+        config.verification.isEnabled = false
+        config.dashboard.loginLimit = limit
+        let runtime = BotKitRuntime(configuration: config, clientProvider: { nil }, logger: Logger(label: "test"))
+        let wired = await runtime.loginAttempts.globalMaximumFailures
+        XCTAssertEqual(wired, 9)
+    }
+
+    func testDashboardPathValidation() {
+        for valid in ["/admin/ai-bots", "admin", "/a/b/c/", "/x.y_z~1"] {
+            var dashboard = BotKitConfiguration.Dashboard()
+            dashboard.path = valid
+            XCTAssertNoThrow(try dashboard.validatePath(), valid)
+        }
+        for invalid in ["/", "", "/:id", "/*", "/**", "/a b", "/a?b", "/caf\u{E9}", "/a/../b", "/a%20b", "/a\u{0}b"] {
+            var dashboard = BotKitConfiguration.Dashboard()
+            dashboard.path = invalid
+            XCTAssertThrowsError(try dashboard.validatePath(), invalid.debugDescription)
+        }
+    }
+
+    func testSessionCookieNameValidation() {
+        for valid in ["botkit_dashboard", "swiftly_bot_dashboard", "__Host-x", "a.b!#$%&'*+-^`|~"] {
+            var dashboard = BotKitConfiguration.Dashboard()
+            dashboard.sessionCookieName = valid
+            XCTAssertNoThrow(try dashboard.validateCookieName(), valid)
+        }
+        for invalid in ["", "a b", "a;b", "a=b", "a,b", "a\"b", "a/b", "caf\u{E9}", "a\tb", "a\u{7F}"] {
+            var dashboard = BotKitConfiguration.Dashboard()
+            dashboard.sessionCookieName = invalid
+            XCTAssertThrowsError(try dashboard.validateCookieName(), invalid.debugDescription) { error in
+                XCTAssertEqual(error as? BotKitConfigurationError, .invalidSessionCookieName(invalid))
+            }
+        }
+    }
+
     func testIntervalDescriptions() {
         XCTAssertEqual(BotDashboardController.describe(15 * 60), "15 minutes")
         XCTAssertEqual(BotDashboardController.describe(3600), "1 hour")
@@ -461,6 +529,73 @@ final class DashboardRoutingTests: XCTestCase {
         try await app.test(.GET, "/internal/bots/") { res async in
             XCTAssertEqual(res.status, .notFound)
         }
+    }
+
+    /// Signs in and returns the session token from the scoped cookie.
+    private func signInToken() async throws -> String {
+        var token: String?
+        try await app.test(.POST, "/internal/bots/login", beforeRequest: { req in
+            try req.content.encode(["username": "owner", "password": "correct horse"], as: .urlEncodedForm)
+        }) { res async in
+            token = res.headers[.setCookie]
+                .first { $0.contains("Path=/internal/bots") }
+                .flatMap { $0.split(separator: ";").first }
+                .map { String($0.split(separator: "=", maxSplits: 1)[1]) }
+        }
+        return try XCTUnwrap(token)
+    }
+
+    /// No database is registered here, so a signed-in GET answers 503 and a
+    /// signed-out one the 200 sign-in page.
+    private func isSignedIn(cookieHeader: String) async throws -> Bool {
+        var status: HTTPStatus = .ok
+        try await app.test(.GET, "/internal/bots/", headers: ["Cookie": cookieHeader]) { res async in status = res.status }
+        return status == .serviceUnavailable
+    }
+
+    /// Sign-in and sign-out also expire a same-named `Path=/` cookie left by
+    /// earlier versions.
+    func testSignInAndSignOutClearTheLegacyRootCookie() async throws {
+        try BotKit.configureRoutes(for: app, config: configuration())
+        for endpoint in ["login", "logout"] {
+            try await app.test(.POST, "/internal/bots/\(endpoint)", beforeRequest: { req in
+                try req.content.encode(["username": "owner", "password": "correct horse"], as: .urlEncodedForm)
+            }) { res async in
+                let setCookies = res.headers[.setCookie]
+                XCTAssertEqual(setCookies.filter { $0.hasPrefix("test_session=") }.count, 2, "\(endpoint): \(setCookies)")
+                let legacy = setCookies.first { $0.contains("Path=/;") || $0.hasSuffix("Path=/") }
+                XCTAssertNotNil(legacy, endpoint)
+                XCTAssertTrue(legacy?.contains("Max-Age=0") == true, endpoint)
+                XCTAssertTrue(legacy?.hasPrefix("test_session=;") == true, endpoint)
+                XCTAssertTrue(setCookies.contains { $0.contains("Path=/internal/bots") }, endpoint)
+            }
+        }
+    }
+
+    /// A browser holding the stale root cookie sends both under one name, in
+    /// either order. Any valid one signs the owner in.
+    func testAValidTokenAmongSameNamedCookiesIsAccepted() async throws {
+        try BotKit.configureRoutes(for: app, config: configuration())
+        let token = try await signInToken()
+        let bothOrders = [
+            "test_session=\(token); test_session=stale",
+            "test_session=stale; test_session=\(token)",
+            "other=1; test_session=stale; test_session=\(token)",
+        ]
+        for header in bothOrders {
+            let signedIn = try await isSignedIn(cookieHeader: header)
+            XCTAssertTrue(signedIn, header)
+        }
+        let staleOnly = try await isSignedIn(cookieHeader: "test_session=stale; test_session=also-stale")
+        XCTAssertFalse(staleOnly)
+        let otherName = try await isSignedIn(cookieHeader: "not_test_session=\(token)")
+        XCTAssertFalse(otherName)
+    }
+
+    func testCookieValuesParsing() {
+        let headers: HTTPHeaders = ["Cookie": "a=1; b=2; a=\"3\"", "cookie": "a=4"]
+        XCTAssertEqual(BotDashboardController.cookieValues(named: "a", in: headers), ["1", "3", "4"])
+        XCTAssertEqual(BotDashboardController.cookieValues(named: "c", in: headers), [])
     }
 
     func testDashboardCanBeDisabled() async throws {

@@ -6,7 +6,7 @@ Recognise an agent the built-in catalog does not know, reclassify one it does, o
 
 Every request's `User-Agent` is matched against the built-in ``AIAgentCatalog`` and your own ``BotKitConfiguration/Detection/customAgents``. An ``AIAgent`` has four fields:
 
-- ``AIAgent/token``: the distinctive substring to look for in the header, such as `ChatGPT-User`. Matched case-insensitively, anywhere in the header.
+- ``AIAgent/token``: the distinctive word to look for in the header, such as `ChatGPT-User`. Matched case-insensitively, as a whole word anywhere in the header. The rules are under "How matching works" below.
 - ``AIAgent/purpose``: what the agent is doing. See <doc:UnderstandingAgentPurposes>.
 - ``AIAgent/operatorName``: who runs it. Defaults to `Unknown`.
 - ``AIAgent/respectsRobotsTxt``: `true` or `false` where the operator has said, `nil` where it has not. `false` is flagged on the dashboard.
@@ -45,9 +45,17 @@ config.detection.customAgents = [
 
 ### How matching works
 
-The longest token that appears in the header wins. That matters because tokens overlap: `Applebot-Extended` contains `Applebot`, and the two mean different things. A shortest-first match would file every `Applebot-Extended` training fetch under AI search. Your custom agents take part in the same longest-first ordering as the built-in ones.
+A token matches only as a whole word: the character before it and the character after it in the header must not be an ASCII letter or digit. Spaces, punctuation (`/`, `;`, `(`, `+`, `-`, `_` and so on) and the start or end of the header all count as boundaries. So `Spider` does not match `Baiduspider/2.0`, and `GPTBot` does not match `NotGPTBotAtAll`, but `GPTBot/1.2;` and `(GPTBot)` both match. A token that itself starts or ends with punctuation is only checked on its letter or digit sides. ASCII letters are compared case-insensitively; any non-ASCII characters in a token must match exactly.
 
-Pick a token that is specific enough not to appear inside ordinary browser user agents, and long enough not to be swallowed by a longer built-in token.
+When several tokens match, the winner is decided in this order:
+
+1. **Longest token.** Tokens overlap: `Applebot-Extended` contains `Applebot`, and since `-` is a boundary both match `Applebot-Extended/0.1`. The two mean different things, and a shortest-first match would file every `Applebot-Extended` training fetch under AI search.
+2. **Custom before built-in**, between tokens of the same length.
+3. **Earliest in the header.** User agents put the product token first and a contact URL after it. The real GPTBot header, `...GPTBot/1.2; +https://openai.com/gptbot`, contains both `GPTBot` and the built-in `OpenAI` token, equally long; `GPTBot` comes first. That holds when you reclassify `GPTBot` with a custom agent too.
+
+The result never depends on the order of your ``BotKitConfiguration/Detection/customAgents`` list.
+
+Pick a token that is specific enough not to be a word in ordinary user agents (`Spider` or `Code` would match every `... spider/1.0` search crawler and VS Code's `Code/1.93`, which is why the catalog leaves both out), and long enough not to be beaten by a longer built-in token.
 
 ``AIAgentCatalog/match(userAgent:)`` does the same lookup against the built-in catalog alone, which is handy in tests. ``AIAgentCatalog/all`` lists every built-in agent.
 

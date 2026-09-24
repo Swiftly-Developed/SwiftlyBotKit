@@ -18,10 +18,19 @@ python3 Scripts/generate-ai-agent-catalog.py
 
 The script uses only the Python standard library. It downloads the current upstream list and rewrites `Sources/SwiftlyBotKit/Catalog/AIAgentCatalogData.swift`. Do not edit that file by hand; the next regeneration overwrites it.
 
-It prints a summary:
+Before writing, it cleans upstream's robots.txt names up for matching against user-agent headers:
+
+- **Versions are stripped.** `MistralAI-User/1.0` becomes `MistralAI-User`, so an agent does not change purpose when it bumps its version.
+- **Case variants are merged.** `meta-externalagent` and `Meta-ExternalAgent` are one agent. The spelling in the hand-audited table wins, and known operator and robots.txt values fill in unknown ones.
+- **Generic words are dropped.** A few upstream entries, such as `Spider` and `Code`, are valid in robots.txt but, as words in a user-agent header, match ordinary software (Sogou's `web spider`, VS Code's `Code/1.93`). The `NOT_IN_USER_AGENTS` table in the script lists them with the reason.
+
+It prints a summary, including every row the clean-up changed:
 
 ```
-wrote Sources/SwiftlyBotKit/Catalog/AIAgentCatalogData.swift: 175 agents
+wrote Sources/SwiftlyBotKit/Catalog/AIAgentCatalogData.swift: 167 agents
+  version stripped       : MistralAI-User/1.0 -> MistralAI-User
+  case duplicate merged  : meta-externalagent + Meta-ExternalAgent
+  dropped, too generic   : Spider: ...
   hand-audited overrides : ...
   upstream taxonomy      : ...
   keyword guess          : ...
@@ -30,12 +39,14 @@ wrote Sources/SwiftlyBotKit/Catalog/AIAgentCatalogData.swift: 175 agents
 
 ### How each agent's purpose is decided
 
-Upstream describes what each agent does in free text: around 70 distinct values across 175 agents, and the most important entries are prose rather than a category label. So ``AIAgent/purpose`` is this package's own classification, decided in this order:
+Upstream describes what each agent does in free text: around 70 distinct values across some 175 upstream entries, and the most important entries are prose rather than a category label. So ``AIAgent/purpose`` is this package's own classification, decided in this order:
 
 1. **Hand-audited overrides.** A table in the script for the agents whose numbers people quote: `GPTBot`, `ClaudeBot`, `ChatGPT-User`, `Claude-User`, `PerplexityBot` and the rest of the major operators' agents. These are never left to a guess.
 2. **Upstream taxonomy.** Entries that use one of upstream's newer category labels are mapped directly.
 3. **Keyword guess.** The remaining descriptions are searched for telling words.
 4. **Fallback.** Anything still unclassified becomes ``AIAgentPurpose/scraper``.
+
+To change only the overrides or the clean-up rules without pulling in new upstream data, run the script with `--from-existing`. It re-applies them to the rows already in `AIAgentCatalogData.swift` and fetches nothing.
 
 ### After regenerating
 

@@ -19,6 +19,9 @@ let package = Package(
         .package(url: "https://github.com/vapor/sql-kit.git", from: "3.28.0"),
         .package(url: "https://github.com/elementary-swift/elementary.git", from: "0.6.0"),
         .package(url: "https://github.com/swiftlang/swift-docc-plugin", from: "1.4.0"),
+        // Test-only: the integration tests run against a real PostgreSQL. The
+        // library target never depends on the driver.
+        .package(url: "https://github.com/vapor/fluent-postgres-driver.git", from: "2.10.0"),
     ],
     targets: [
         .target(
@@ -37,6 +40,15 @@ let package = Package(
                 "SwiftlyBotKit",
                 .product(name: "XCTVapor", package: "vapor"),
             ]
+        ),
+        .testTarget(
+            name: "SwiftlyBotKitIntegrationTests",
+            dependencies: [
+                "SwiftlyBotKit",
+                .product(name: "FluentPostgresDriver", package: "fluent-postgres-driver"),
+                .product(name: "XCTVapor", package: "vapor"),
+            ],
+            path: "Tests/SwiftlyBotKitIntegrationTests"
         ),
     ]
 )

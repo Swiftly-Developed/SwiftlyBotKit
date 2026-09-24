@@ -6,7 +6,7 @@ See which AI agents read your Vapor app, what they were doing, and whether they 
 
 Anything can count "AI bot hits". SwiftlyBotKit records the breakdown behind that number, on three axes:
 
-- **Which agent.** Every request is matched against ``AIAgentCatalog``, 175 known AI agents generated from the community ai.robots.txt list, plus any you add.
+- **Which agent.** Every request is matched against ``AIAgentCatalog``, 167 known AI agents generated from the community ai.robots.txt list, plus any you add.
 - **What it was doing.** Each agent has an ``AIAgentPurpose``: collecting training data, indexing for AI search, fetching a page live because a person asked an assistant a question, acting as an autonomous agent, or scraping. The operators split these into separate user agents themselves, so the split is theirs, not a guess.
 - **Real or forged.** Claimed agents are checked against the IP ranges their operators publish, so ``BotVerification/verified``, ``BotVerification/unverified`` and ``BotVerification/spoofed`` are separate numbers.
 
@@ -37,7 +37,7 @@ SwiftlyBotKit needs PostgreSQL at runtime. The package depends on Fluent and SQL
 
 ### Configuration
 
-- <doc:Configuration>
+- <doc:ConfiguringSwiftlyBotKit>
 - ``BotKitConfiguration``
 - ``BotKitConfiguration/Recording``
 - ``BotKitConfiguration/Detection``

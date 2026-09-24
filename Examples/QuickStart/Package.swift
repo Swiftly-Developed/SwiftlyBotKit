@@ -7,7 +7,9 @@ let package = Package(
         .macOS(.v14),
     ],
     dependencies: [
-        .package(path: "../.."),
+        // Named explicitly: the identity of a path dependency is otherwise the
+        // folder name, which breaks when the clone is not named SwiftlyBotKit.
+        .package(name: "SwiftlyBotKit", path: "../.."),
         .package(url: "https://github.com/vapor/vapor.git", from: "4.99.0"),
         .package(url: "https://github.com/vapor/fluent.git", from: "4.9.0"),
         .package(url: "https://github.com/vapor/fluent-postgres-driver.git", from: "2.8.0"),

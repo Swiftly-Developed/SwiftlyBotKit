@@ -10,7 +10,7 @@ The dashboard is mounted at ``BotKitConfiguration/Dashboard/path``, `/admin/ai-b
 - `POST /admin/ai-bots/login`: signs in with the form fields `username` and `password`.
 - `POST /admin/ai-bots/logout`: signs out.
 
-Both pages send `X-Robots-Tag: noindex, nofollow` and `Cache-Control: no-store`. Keep the path under something your `robots.txt` disallows as well.
+Every response from these routes, including the sign-in and sign-out redirects, sends `X-Robots-Tag: noindex, nofollow`, `Cache-Control: no-store`, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and a `Content-Security-Policy` that allows no script at all (see "Response headers" below). Keep the path under something your `robots.txt` disallows as well.
 
 It is mounted on every host the app answers for, so a multi-site app has one dashboard across all of its sites, with the site switcher doing the filtering.
 
@@ -37,11 +37,19 @@ The switcher is a menu of links with each site's logo, and is hidden when fewer 
 
 ### Time zones
 
-Every bucket boundary is drawn in ``BotKitConfiguration/Dashboard/timeZone``, on both sides of the query: Swift builds the buckets with a `Calendar` in that zone, and PostgreSQL is handed the same zone's identifier for `AT TIME ZONE`. So a "day" means the same thing in both, including on the two days a year when a local day is 23 or 25 hours long, where plain epoch arithmetic would drift.
+A bucket is one local wall-clock hour (24h) or one local calendar day (7d, 30d, 90d) in ``BotKitConfiguration/Dashboard/timeZone``. Every boundary is computed in Swift, from Foundation's rules for that zone, and PostgreSQL is sent the boundaries as instants: it sorts rows between them with `width_bucket` and never sees the zone's name. So the two sides cannot disagree about a DST change, and the zone does not have to exist in the database server's tz data.
 
-Use an IANA identifier such as `Europe/Paris`. A fixed-offset zone has an identifier like `GMT+0100`, which PostgreSQL reads with the opposite sign.
+Around DST changes the buckets follow the wall clock:
+
+- The two change days are 23 and 25 hours long. Where the change happens at midnight (Santiago, Cairo), the day whose midnight is skipped starts at 01:00.
+- On the 24h view, a skipped hour has no column.
+- A repeated hour, when clocks go back, is one column holding both passes, so no label appears twice. That column can be up to twice as tall as its neighbours.
+
+Any ``BotKitTimeZone`` works, including ``BotKitTimeZone/custom(_:)`` with a fixed offset such as `TimeZone(secondsFromGMT: 3600)`, which buckets correctly but never observes daylight saving time. A named zone the host's tz database does not have yet (``BotKitTimeZone/isAvailable`` is `false`, for example `America/Coyhaique` with Swift 6.0 or 6.1 on Linux) is drawn in UTC, and the chart caption names the zone actually used.
 
 Buckets are generated in Swift rather than taken from the query results, so a quiet hour shows as an empty column instead of disappearing from the axis. ``BotDateRange/buckets(now:in:)``, ``BotDateRange/start(from:in:)`` and ``BotDateRange/axisLabel(for:in:)`` expose the same arithmetic.
+
+A bot row with no purpose, which only a writer other than this package can leave, is counted in the tiles and charted as ``AIAgentPurpose/scraper``, the catalog's own fallback for an agent it cannot classify, so the chart always adds up to the tile.
 
 ### How it is built
 
@@ -51,10 +59,29 @@ Purpose colours come from a fixed categorical palette, assigned in ``AIAgentPurp
 
 ### Signing in
 
-Sessions are a signed cookie, not server state, so a sign-in survives a restart and works across instances as long as ``BotKitConfiguration/signingSecret`` is stable. The cookie is `HttpOnly` and `SameSite=Lax`, and `Secure` according to ``BotKitConfiguration/Dashboard/secureCookies``.
+Sessions are a signed cookie, not server state, so a sign-in survives a restart and works across instances as long as ``BotKitConfiguration/signingSecret`` is stable. The signature covers the expiry and a fingerprint of the configured username and password, so changing the password (or the username, or the secret) ends every existing session. The cookie is `HttpOnly`, `SameSite=Lax`, scoped with `Path` to ``BotKitConfiguration/Dashboard/path``, and `Secure` according to ``BotKitConfiguration/Dashboard/secureCookies``.
 
-Username and password are both compared on every attempt, in constant time, so a failure does not reveal which half was wrong. Failed attempts are throttled per client by ``BotKitConfiguration/Dashboard/loginLimit``, keyed on a hash of the client IP.
+Username and password are both compared on every attempt, in constant time, so a failure does not reveal which half was wrong. A username or password that is empty or only whitespace counts as not configured, and the dashboard is not mounted. Successful sign-ins are logged at `info` and failed ones at `warning`, with a keyed hash of the client address rather than the address.
+
+Sign-in and sign-out refuse cross-site requests with 403: a request whose `Sec-Fetch-Site` header is `cross-site`, or whose `Origin` header does not match its `Host` (or `X-Forwarded-Host`). A request carrying neither header, such as one from `curl`, is allowed.
+
+#### Throttling
+
+Failed attempts are limited by ``BotKitConfiguration/Dashboard/loginLimit`` in two ways, both in memory and per process:
+
+- **Per client**, keyed on a hash of the client IP, with IPv6 addresses grouped by their /64 so one subscriber cannot rotate through its own prefix. When the client IP strategy yields no address, the socket peer address is used.
+- **Process-wide**: at most 50 failures from all clients together per window (or ``BotKitConfiguration/LoginLimit/maximumFailures``, if higher). This bounds guessing even when the client address can be forged, for example by rotating `X-Forwarded-For` against an app reachable without its proxy. When the ceiling is reached, every sign-in, including the owner's, is refused with 429 until the window passes, and a `critical` log line is written once.
+
+An attempt counts against both limits before the password is checked, in one step with the limit check, so concurrent requests cannot slip past it. A successful sign-in clears the client's count.
+
+#### Signing out
+
+Sign-out clears the cookie in the browser. Because sessions are stateless, it does not revoke a copy of the cookie taken earlier: that copy stays valid until it expires, or until the password or the signing secret changes. If a cookie may have leaked, change the dashboard password.
+
+#### Response headers
+
+The `Content-Security-Policy` is `default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`. The pages need no script; inline `<style>`, `style` attributes and inline SVG are covered by `style-src 'unsafe-inline'`. When a ``BotDashboardSite/logoPath`` is an absolute `http` or `https` URL, its origin is added to `img-src`; root-relative paths are covered by `'self'`.
 
 ### Database
 
-The dashboard needs `req.db` to be a PostgreSQL database. It answers 503 when the database is not SQL-capable. The queries use `COUNT(*) FILTER`, `date_trunc`, `AT TIME ZONE` and `BOOL_AND`, and read the fixed table `ai_bot_visits`.
+The dashboard needs `req.db` to be a PostgreSQL database. It answers 503 when no database is registered under ``BotKitConfiguration/database`` or when the database is not SQL-capable. The queries use `COUNT(*) FILTER`, `width_bucket` over a `timestamptz[]` and `BOOL_AND`, and read the fixed table `ai_bot_visits`. They need nothing from the server's tz data.
