@@ -138,6 +138,24 @@ final class MigrationIntegrationTests: PostgresIntegrationTestCase {
         XCTAssertTrue(awaited11)
     }
 
+    /// Production state before the module rename: the migration is recorded
+    /// as `BotKit.CreateAIBotVisit` and the table holds data. Upgrading must
+    /// boot: autoMigrate records the pinned name and leaves the table alone.
+    func testUpgradeFromTheOldModuleNameKeepsTheTableAndBoots() async throws {
+        BotKit.configure(for: app)
+        try await app.autoMigrate()
+        try await insertBotRows(at: [Date()])
+        try await sql().raw("UPDATE _fluent_migrations SET name = 'BotKit.CreateAIBotVisit' WHERE name = 'SwiftlyBotKit.CreateAIBotVisit'").run()
+
+        try await app.autoMigrate()
+
+        let rows = try await count()
+        XCTAssertEqual(rows, 1, "the upgrade touched existing rows")
+        let names = try await sql().raw("SELECT name FROM _fluent_migrations WHERE name LIKE '%CreateAIBotVisit%' ORDER BY name")
+            .all().map { try $0.decode(column: "name", as: String.self) }
+        XCTAssertEqual(names, ["BotKit.CreateAIBotVisit", "SwiftlyBotKit.CreateAIBotVisit"])
+    }
+
     func testAutoMigrateTwiceIsANoOp() async throws {
         BotKit.configure(for: app)
         try await app.autoMigrate()

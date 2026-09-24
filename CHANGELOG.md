@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-24
+
+### Fixed
+
+- The migration's name is now pinned to `SwiftlyBotKit.CreateAIBotVisit`
+  instead of Fluent's module-derived default, and it skips an existing
+  `ai_bot_visits` table. An app that migrated under the package's earlier
+  module name (`BotKit.CreateAIBotVisit`) would otherwise try to create the
+  table again after upgrading and fail to boot.
+
 ## [0.1.0] - 2026-09-24
 
 Initial public release.
@@ -178,5 +188,6 @@ Initial public release.
   agents.
 - `Scripts/generate-ai-agent-catalog.py` to regenerate the catalog.
 
-[Unreleased]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.1.0...HEAD
+[Unreleased]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.1.1...HEAD
+[0.1.1]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.1.0...0.1.1
 [0.1.0]: https://github.com/Swiftly-Developed/SwiftlyBotKit/releases/tag/0.1.0

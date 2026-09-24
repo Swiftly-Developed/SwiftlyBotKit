@@ -607,3 +607,11 @@ final class DashboardRoutingTests: XCTestCase {
         }
     }
 }
+
+final class MigrationNameTests: XCTestCase {
+    /// Apps record this string in `_fluent_migrations`; changing it makes an
+    /// upgraded app try to create the table again.
+    func testMigrationNameIsPinned() {
+        XCTAssertEqual(CreateAIBotVisit().name, "SwiftlyBotKit.CreateAIBotVisit")
+    }
+}

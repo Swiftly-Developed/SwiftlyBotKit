@@ -9,7 +9,24 @@ import FluentSQL
 /// be retried once the blocker is gone. Names and indexes are frozen: apps
 /// have already run this migration, so a change needs a new migration.
 struct CreateAIBotVisit: AsyncMigration {
+    /// Pinned rather than Fluent's default, which is the type name *with its
+    /// module*: the module was renamed once (`BotKit` to `SwiftlyBotKit`), and
+    /// an app that migrated under the old name would otherwise see a new,
+    /// unapplied migration after upgrading. Never change this string.
+    var name: String { "SwiftlyBotKit.CreateAIBotVisit" }
+
     func prepare(on database: Database) async throws {
+        // An app that ran this migration under an earlier name (the module's
+        // old `BotKit.CreateAIBotVisit`) already has the table. Creating it
+        // again would fail on the first enum type and stop the app at boot,
+        // so an existing table means there is nothing to do.
+        if let sql = database as? SQLDatabase,
+           let exists = try await sql.raw("SELECT to_regclass('ai_bot_visits') IS NOT NULL AS present")
+               .first()?.decode(column: "present", as: Bool.self),
+           exists {
+            database.logger.info("ai_bot_visits already exists; recording CreateAIBotVisit as applied without changes.")
+            return
+        }
         try await database.transaction { database in
             try await prepareSchema(on: database)
         }
