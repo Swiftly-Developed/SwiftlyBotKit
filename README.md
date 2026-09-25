@@ -1,3 +1,7 @@
+<p align="center">
+  <img src=".github/assets/logo.svg" width="128" height="128" alt="SwiftlyBotKit logo: a bot above a rising bar chart">
+</p>
+
 # SwiftlyBotKit
 
 AI agent traffic tracking for [Vapor](https://vapor.codes) apps, with a
