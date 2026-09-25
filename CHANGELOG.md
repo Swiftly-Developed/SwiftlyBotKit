@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The tutorials page is now published at `tutorials/meetswiftlybotkit`, the
+  address the README links to. DocC names the page after its file, which was
+  `TableOfContents.tutorial`.
+
 ## [0.1.1] - 2026-09-24
 
 ### Fixed
