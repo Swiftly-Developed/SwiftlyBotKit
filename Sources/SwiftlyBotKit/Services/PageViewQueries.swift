@@ -210,6 +210,154 @@ struct PageViewQueries: Sendable {
         return (rows, distinct)
     }
 
+    // MARK: - Color by
+
+    /// The people series split by `colorBy`, or `nil` for ``PageViewColorBy/none``.
+    ///
+    /// The page and section come from the quarter-hour counters, so they use
+    /// the range's own buckets. A dimension is stored per day: on the hourly
+    /// range it is drawn as the two local days the window touches, yesterday
+    /// and today. Its values under `smallCellThreshold` are folded into Other,
+    /// and page views with no value for it (counted before the dimensions
+    /// were on, or without a country table) show as Not recorded.
+    func breakdown(
+        _ colorBy: PageViewColorBy,
+        range: BotDateRange,
+        siteKey: String?,
+        smallCellThreshold: Int,
+        pages: [PageViewData.PageRow] = [],
+        now: Date = Date()
+    ) async throws -> PageViewBreakdown? {
+        switch colorBy {
+        case .none:
+            return nil
+        case .page, .section:
+            let window = range.window(now: now, in: timeZone)
+            let value = colorBy == .page ? "path" : Self.sectionExpression
+            var query: SQLQueryString = """
+            SELECT width_bucket(bucket_start, \(bind: window.runs.map(\.start))::timestamptz[]) AS run,
+                   \(unsafeRaw: value) AS value, SUM(views)::bigint AS n
+            FROM page_view_counts
+            WHERE bucket_start >= \(bind: window.start)
+            """
+            query += siteClause(siteKey)
+            query += " GROUP BY 1, 2"
+            var rows: [(bucket: Int, value: String, count: Int)] = []
+            for row in try await database.raw(query).all() {
+                guard let run = try? row.decode(column: "run", as: Int.self),
+                      (1...window.runs.count).contains(run),
+                      let value = try? row.decode(column: "value", as: String.self),
+                      let n = try? row.decode(column: "n", as: Int.self)
+                else { continue }
+                rows.append((window.runs[run - 1].bucket, value, n))
+            }
+            var breakdown = PageViewBreakdown.build(colorBy: colorBy, buckets: window.buckets.map(\.start),
+                                                    isDailyFallback: false, rows: rows, bucketTotals: nil,
+                                                    smallCellThreshold: nil)
+            let views = Dictionary(pages.map { ($0.path, $0.people) }, uniquingKeysWith: +)
+            breakdown.splitPagesByOwnValue(pages.map(\.path), views: views,
+                                           value: colorBy == .page ? { $0 } : Self.section(of:))
+            return breakdown
+        case .dimension(let dimension):
+            let window = range.isHourly
+                ? BotDateRange.week.window(now: now, in: timeZone).suffix(2)
+                : range.window(now: now, in: timeZone)
+            // A daily bucket's key is its local date as days since 1970,
+            // exactly what `PageViewDay` stores.
+            let bucketByDay = Dictionary(uniqueKeysWithValues: window.buckets.enumerated().map { (Int32($1.key), $0) })
+            guard let firstDay = window.buckets.first.map({ PageViewDay(daysSince1970: Int32($0.key)).isoDate }) else {
+                return nil
+            }
+            var query: SQLQueryString = """
+            SELECT (day - DATE '1970-01-01')::int AS day_number, value, SUM(views)::bigint AS n
+            FROM page_view_dimension_counts
+            WHERE dimension = \(bind: dimension.rawValue) AND day >= \(bind: firstDay)::date
+            """
+            query += siteClause(siteKey)
+            query += " GROUP BY 1, 2"
+            var rows: [(bucket: Int, value: String, count: Int)] = []
+            for row in try await database.raw(query).all() {
+                guard let day = try? row.decode(column: "day_number", as: Int.self),
+                      let bucket = bucketByDay[Int32(day)],
+                      let value = try? row.decode(column: "value", as: String.self),
+                      let n = try? row.decode(column: "n", as: Int.self)
+                else { continue }
+                rows.append((bucket, value, n))
+            }
+            let totals = try await peopleSeries(window: window, siteKey: siteKey)
+            var breakdown = PageViewBreakdown.build(colorBy: colorBy, buckets: window.buckets.map(\.start),
+                                                    isDailyFallback: range.isHourly, rows: rows,
+                                                    bucketTotals: totals, smallCellThreshold: smallCellThreshold)
+            breakdown.pageSplits = try await dimensionSplits(
+                dimension, breakdown: breakdown, paths: pages.map(\.path),
+                since: window.start, firstDay: firstDay, siteKey: siteKey
+            )
+            return breakdown
+        }
+    }
+
+    /// Each page's views by `dimension` over the chart's days, mapped onto
+    /// the breakdown's series, with what the dimension does not account for
+    /// as Not recorded.
+    private func dimensionSplits(
+        _ dimension: PageViewDimension,
+        breakdown: PageViewBreakdown,
+        paths: [String],
+        since: Date,
+        firstDay: String,
+        siteKey: String?
+    ) async throws -> [String: [Int]] {
+        guard !paths.isEmpty, !breakdown.series.isEmpty else { return [:] }
+        var splits: [String: [Int]] = [:]
+        var byValue: SQLQueryString = """
+        SELECT path, value, SUM(views)::bigint AS n
+        FROM page_view_dimension_counts
+        WHERE dimension = \(bind: dimension.rawValue) AND day >= \(bind: firstDay)::date
+          AND path = ANY(\(bind: paths)::text[])
+        """
+        byValue += siteClause(siteKey)
+        byValue += " GROUP BY 1, 2"
+        for row in try await database.raw(byValue).all() {
+            guard let path = try? row.decode(column: "path", as: String.self),
+                  let value = try? row.decode(column: "value", as: String.self),
+                  let n = try? row.decode(column: "n", as: Int.self),
+                  let index = breakdown.seriesIndex(for: value)
+            else { continue }
+            splits[path, default: Array(repeating: 0, count: breakdown.series.count)][index] += n
+        }
+        guard let unrecorded = breakdown.series.firstIndex(where: { $0.kind == .unrecorded }) else { return splits }
+        var viewsQuery: SQLQueryString = """
+        SELECT path, SUM(views)::bigint AS n
+        FROM page_view_counts
+        WHERE bucket_start >= \(bind: since) AND path = ANY(\(bind: paths)::text[])
+        """
+        viewsQuery += siteClause(siteKey)
+        viewsQuery += " GROUP BY 1"
+        for row in try await database.raw(viewsQuery).all() {
+            guard let path = try? row.decode(column: "path", as: String.self),
+                  let n = try? row.decode(column: "n", as: Int.self)
+            else { continue }
+            var counts = splits[path] ?? Array(repeating: 0, count: breakdown.series.count)
+            counts[unrecorded] = max(0, n - counts.reduce(0, +))
+            splits[path] = counts
+        }
+        return splits
+    }
+
+    /// ``sectionExpression`` in Swift.
+    static func section(of path: String) -> String {
+        let rest = path.dropFirst()
+        guard let slash = rest.firstIndex(of: "/") else { return path }
+        return String(path[...slash])
+    }
+
+    /// The first path segment with its slashes, `/insights/` for
+    /// `/insights/some-article/`; a path with a single segment is itself.
+    static let sectionExpression = """
+        CASE WHEN strpos(substr(path, 2), '/') = 0 THEN path \
+        ELSE substr(path, 1, strpos(substr(path, 2), '/') + 1) END
+        """
+
     /// When page views were first counted for this site (or any site).
     private func firstCountedView(siteKey: String?) async throws -> Date? {
         var query: SQLQueryString = "SELECT MIN(bucket_start) AS first FROM page_view_counts WHERE TRUE"

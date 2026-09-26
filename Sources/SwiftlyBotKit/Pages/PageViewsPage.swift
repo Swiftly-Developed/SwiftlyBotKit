@@ -24,7 +24,10 @@ enum PageViewsPage {
         selectedSite: BotDashboardSite?,
         generatedAt: Date,
         options: BotKitConfiguration.Dashboard = .default,
-        audience: PageViewAudience = .people
+        audience: PageViewAudience = .people,
+        colorBy: PageViewColorBy = .none,
+        colorOptions: [PageViewColorBy] = [],
+        breakdown: PageViewBreakdown? = nil
     ) -> String {
         let siteName: String? = sites.count > 1 ? (selectedSite?.name ?? "All sites") : nil
         let base = options.basePath
@@ -45,13 +48,18 @@ enum PageViewsPage {
                                          generatedAt: generatedAt, timeZone: timeZone)
                     DashboardPage.filters(base: base, section: .pageViews, sections: DashboardSection.available(pageViews: true), range: range,
                                           ranges: options.offeredDateRanges, sites: sites, selectedSite: selectedSite,
-                                          audience: audience)
+                                          audience: audience, colorBy: colorBy)
                     if data.total(for: audience) == 0 {
                         emptyState(range: range, audience: audience)
                     } else {
                         tiles(data, range: range, audience: audience)
-                        chartCard(data, range: range, timeZone: timeZone, audience: audience)
-                        pagesCard(data.topPages, audience: audience)
+                        chartCard(data, range: range, timeZone: timeZone, audience: audience,
+                                  colorMenu: audience == .people && colorOptions.count > 1
+                                      ? ColorMenu(current: colorBy, options: colorOptions, base: base,
+                                                  siteKey: selectedSite?.key ?? "all", range: range)
+                                      : nil,
+                                  breakdown: breakdown)
+                        pagesCard(data.topPages, audience: audience, breakdown: breakdown)
                     }
                     footnote(audience: audience)
                 }
@@ -163,38 +171,157 @@ enum PageViewsPage {
 
     // MARK: - Chart
 
+    /// What the "Color by" menu needs to build its links.
+    struct ColorMenu {
+        let current: PageViewColorBy
+        let options: [PageViewColorBy]
+        let base: String
+        let siteKey: String
+        let range: BotDateRange
+
+        func href(_ option: PageViewColorBy) -> String {
+            DashboardPage.dashboardURL(base: base, section: .pageViews, siteKey: siteKey, range: range,
+                                       audience: .people, colorBy: option)
+        }
+    }
+
     private static func chartCard(
         _ data: PageViewData,
         range: BotDateRange,
         timeZone: TimeZone,
-        audience: PageViewAudience
+        audience: PageViewAudience,
+        colorMenu: ColorMenu? = nil,
+        breakdown: PageViewBreakdown? = nil
     ) -> some HTML {
         div(.class("card")) {
-            h2 { "\(heroLabel(audience)) over time" }
-            p(.class("hint")) {
-                "\(range.isHourly ? "Hourly" : "Daily") buckets, \(timeZone.identifier).\(countingNote(data, audience: audience, timeZone: timeZone))"
+            div(.class("card-head")) {
+                h2 { "\(heroLabel(audience)) over time" }
+                if let colorMenu {
+                    colorByMenu(colorMenu)
+                }
             }
-            div(.class("chart")) {
-                HTMLRaw(BotCharts.columns(
-                    data.series.map { point in
-                        var segments: [BotCharts.ColumnSegment] = []
-                        if audience.includesPeople {
-                            segments.append(.init(label: "People", color: peopleColor, count: point.people))
-                        }
-                        if audience.includesAgents {
-                            segments.append(.init(label: "AI agents", color: agentsColor, count: point.agents))
-                        }
-                        return (point.bucket, segments)
-                    },
-                    range: range,
-                    timeZone: timeZone,
-                    ariaLabel: "\(heroLabel(audience)) per \(range.isHourly ? "hour" : "day")"
-                ))
+            p(.class("hint")) { chartHint(data, range: range, timeZone: timeZone, audience: audience, breakdown: breakdown) }
+            if let breakdown {
+                breakdownChart(breakdown, range: range, timeZone: timeZone)
+            } else {
+                div(.class("chart")) {
+                    HTMLRaw(BotCharts.columns(
+                        data.series.map { point in
+                            var segments: [BotCharts.ColumnSegment] = []
+                            if audience.includesPeople {
+                                segments.append(.init(label: "People", color: peopleColor, count: point.people))
+                            }
+                            if audience.includesAgents {
+                                segments.append(.init(label: "AI agents", color: agentsColor, count: point.agents))
+                            }
+                            return (point.bucket, segments)
+                        },
+                        range: range,
+                        timeZone: timeZone,
+                        ariaLabel: "\(heroLabel(audience)) per \(range.isHourly ? "hour" : "day")"
+                    ))
+                }
+                if audience == .combined {
+                    div(.class("legend")) {
+                        legendEntry("People", color: peopleColor, count: data.people)
+                        legendEntry("AI agents", color: agentsColor, count: data.agents)
+                    }
+                }
             }
-            if audience == .combined {
-                div(.class("legend")) {
-                    legendEntry("People", color: peopleColor, count: data.people)
-                    legendEntry("AI agents", color: agentsColor, count: data.agents)
+        }
+    }
+
+    static func chartHint(
+        _ data: PageViewData,
+        range: BotDateRange,
+        timeZone: TimeZone,
+        audience: PageViewAudience,
+        breakdown: PageViewBreakdown?
+    ) -> String {
+        let daily = breakdown?.isDailyFallback == true || !range.isHourly
+        var hint = "\(daily ? "Daily" : "Hourly") buckets, \(timeZone.identifier)."
+        if let breakdown {
+            hint += " Coloured by \(breakdown.colorBy.label.lowercased())."
+            if breakdown.isDailyFallback {
+                hint += " \(breakdown.colorBy.label) is stored per day, so this shows yesterday and today."
+            }
+            if breakdown.series.contains(where: { $0.kind == .unrecorded }) {
+                hint += " Not recorded: views counted before this breakdown was switched on\(breakdown.colorBy == .dimension(.country) ? " or without a country table" : "")."
+            }
+            if let threshold = breakdown.smallCellThreshold {
+                hint += " Values with fewer than \(threshold) views are counted in Other."
+            }
+        } else {
+            hint += countingNote(data, audience: audience, timeZone: timeZone)
+        }
+        return hint
+    }
+
+    /// A `<details>` menu of links, like the site switcher, so it works
+    /// with the dashboard's no-script CSP.
+    private static func colorByMenu(_ menu: ColorMenu) -> some HTML {
+        details(.class("colorby")) {
+            summary(.custom(name: "aria-label", value: "Color by: \(menu.current.label)")) {
+                "Color by "
+                b { menu.current.label }
+                span(.class("chev"), .custom(name: "aria-hidden", value: "true")) { "\u{25BE}" }
+            }
+            div(.class("menu")) {
+                for option in menu.options {
+                    if option == .dimension(PageViewDimension.allCases[0]) {
+                        div(.class("group")) { "Breakdowns, per day" }
+                    }
+                    if option == menu.current {
+                        a(.href(menu.href(option)), .class("on"), .custom(name: "aria-current", value: "true")) { option.label }
+                    } else {
+                        a(.href(menu.href(option))) { option.label }
+                    }
+                }
+            }
+        }
+    }
+
+    /// The stacked chart and, under it, every value's total for the period
+    /// in its colour.
+    @HTMLBuilder
+    private static func breakdownChart(_ breakdown: PageViewBreakdown, range: BotDateRange, timeZone: TimeZone) -> some HTML {
+        let masks = breakdown.smallCellThreshold != nil
+        // Largest value at the baseline, Other and Not recorded on top.
+        let stacks = breakdown.buckets.indices.map { bucket in
+            (breakdown.buckets[bucket], breakdown.series.indices.map { index -> BotCharts.ColumnSegment in
+                let count = breakdown.series[index].counts[bucket]
+                let label = breakdown.display(count)
+                return .init(label: breakdown.series[index].label, color: breakdown.color(at: index), count: count,
+                             countLabel: masks && label.hasPrefix("<") ? label : nil,
+                             isRemainder: breakdown.series[index].kind != .value)
+            })
+        }
+        // The labels and popovers follow the buckets drawn, not the range:
+        // days even on the 24-hour range when the breakdown is daily.
+        let axisRange: BotDateRange = breakdown.isDailyFallback ? .week : range
+        div(.class("chart")) {
+            HTMLRaw(BotCharts.columns(
+                stacks,
+                range: axisRange,
+                timeZone: timeZone,
+                ariaLabel: "Page views per \(axisRange.isHourly ? "hour" : "day"), coloured by \(breakdown.colorBy.label.lowercased())",
+                popoverDescending: true
+            ))
+        }
+        if breakdown.series.isEmpty {
+            p(.class("hint")) { "Nothing recorded for this breakdown in the period." }
+        } else {
+            div(.class("legend totals"), .custom(name: "aria-label", value: "Totals for the period")) {
+                for index in breakdown.series.indices {
+                    let series = breakdown.series[index]
+                    div {
+                        i(.custom(name: "style", value: "background:\(breakdown.color(at: index))")) {}
+                        span { series.label }
+                        b { breakdown.display(series.total) }
+                        if !(masks && breakdown.display(series.total).hasPrefix("<")) {
+                            em { BotCharts.share(series.total, of: breakdown.total) }
+                        }
+                    }
                 }
             }
         }
@@ -216,17 +343,31 @@ enum PageViewsPage {
 
     // MARK: - Pages
 
-    private static func pagesCard(_ pages: [PageViewData.PageRow], audience: PageViewAudience) -> some HTML {
+    private static func pagesCard(
+        _ pages: [PageViewData.PageRow],
+        audience: PageViewAudience,
+        breakdown: PageViewBreakdown? = nil
+    ) -> some HTML {
         div(.class("card")) {
             h2 { "Most-read pages" }
             p(.class("hint")) {
                 switch audience {
-                case .people: "What people read, with the AI agent reads of the same page beside it."
+                case .people:
+                    if let breakdown {
+                        "What people read, each page split by \(breakdown.colorBy.label.lowercased()) in the chart's colours\(breakdown.isDailyFallback ? " (the split is over yesterday and today)" : ""), with the AI agent reads beside it."
+                    } else {
+                        "What people read, with the AI agent reads of the same page beside it."
+                    }
                 case .agents: "What AI agents fetched, with the page views by people beside it."
                 case .combined: "Every read of each page, split into people and AI agents."
                 }
             }
-            HTMLRaw(BotCharts.barRows(pages.map { row(for: $0, audience: audience) }))
+            HTMLRaw(BotCharts.barRows(pages.map { page in
+                if audience == .people, let breakdown {
+                    return row(for: page, breakdown: breakdown)
+                }
+                return row(for: page, audience: audience)
+            }))
             if audience == .combined {
                 div(.class("legend")) {
                     div {
@@ -240,6 +381,37 @@ enum PageViewsPage {
                 }
             }
         }
+    }
+
+    /// A page's bar split by the chart's breakdown, its popover listing
+    /// each part.
+    static func row(for page: PageViewData.PageRow, breakdown: PageViewBreakdown) -> BotCharts.BarRow {
+        var row = row(for: page, audience: .people)
+        guard let split = breakdown.pageSplits[page.path], split.contains(where: { $0 > 0 }) else { return row }
+        let splitTotal = split.reduce(0, +)
+        let order = split.indices.filter { split[$0] > 0 }
+        // Largest first in the popover, catch-alls last; the bar keeps the
+        // chart's order so colours sit in the same place on every row.
+        let popoverOrder = order.sorted { a, b in
+            let aRest = breakdown.series[a].kind != .value, bRest = breakdown.series[b].kind != .value
+            if aRest != bRest { return !aRest }
+            return split[a] != split[b] ? split[a] > split[b] : a < b
+        }
+        let details = popoverOrder.map { index -> BotCharts.PopoverLine in
+            let label = breakdown.display(split[index])
+            let masked = label.hasPrefix("<")
+            return .init(label: breakdown.series[index].label, color: breakdown.color(at: index), count: split[index],
+                         shareOf: masked ? nil : splitTotal, countLabel: masked ? label : nil)
+        }
+        row = BotCharts.BarRow(
+            name: row.name, meta: row.meta, value: row.value, note: row.note, color: row.color, flag: row.flag,
+            details: details,
+            detailNote: breakdown.isDailyFallback
+                ? "Split over yesterday and today"
+                : (page.agents > 0 ? "\(BotCharts.grouped(page.agents)) AI agent reads" : nil)
+        )
+        row.parts = order.map { (color: breakdown.color(at: $0), count: split[$0]) }
+        return row
     }
 
     static func row(for page: PageViewData.PageRow, audience: PageViewAudience) -> BotCharts.BarRow {
@@ -292,7 +464,7 @@ enum PageViewsPage {
 
     private static func footnote(audience: PageViewAudience) -> some HTML {
         p(.class("sub")) {
-            "People: counted without cookies and without storing anything about the visitor (no IP address, no user agent, no referrer); each view adds one to a counter for its page and quarter-hour, and only successful HTML pages opened in a browser count. These are views, not visitors. AI agents: successful page requests by agents in the catalog; robots.txt, sitemaps and errors are on the AI agents tab. Other bots appear in neither."
+            "People: counted without cookies and without storing anything about the visitor (no IP address, no user agent, no full referrer); each view adds one to a counter for its page and quarter-hour and, for the Color by breakdowns, to daily counters of coarse values such as the country or the referring site, and only successful HTML pages opened in a browser count. These are views, not visitors. AI agents: successful page requests by agents in the catalog; robots.txt, sitemaps and errors are on the AI agents tab. Other bots appear in neither."
         }
     }
 }

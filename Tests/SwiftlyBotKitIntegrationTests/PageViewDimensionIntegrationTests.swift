@@ -99,3 +99,48 @@ final class PageViewDimensionIntegrationTests: PostgresIntegrationTestCase {
         XCTAssertEqual(values, ["browser=Safari", "language=nl", "utm_source=newsletter"])
     }
 }
+
+final class PageViewBreakdownIntegrationTests: PostgresIntegrationTestCase {
+
+    func testBreakdownsByPageSectionAndDimension() async throws {
+        var config = baseConfiguration()
+        config.pageViews.isEnabled = true
+        config.pageViews.dimensions.isEnabled = true
+        try BotKit.install(on: app, config: config)
+        try await app.autoMigrate()
+        let counter = try XCTUnwrap(app.storage[BotKit.PageViewCounterKey.self])
+        let now = Date(timeIntervalSince1970: 1_790_400_000)
+        var headers = HTTPHeaders()
+        headers.add(name: .userAgent, value: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15")
+        let facts = PageViewFacts.derive(headers: headers, query: nil, host: nil, clientIP: nil, countries: nil)
+        for _ in 0..<6 { counter.record(siteKey: "a", path: "/blog/one/", facts: facts, at: now.addingTimeInterval(-3_600)) }
+        for _ in 0..<2 { counter.record(siteKey: "a", path: "/blog/two/", facts: facts, at: now.addingTimeInterval(-3_600)) }
+        // Counted without dimensions: Not recorded.
+        for _ in 0..<3 { counter.record(siteKey: "a", path: "/", at: now.addingTimeInterval(-7_200)) }
+        await counter.flush()
+
+        let queries = PageViewQueries(database: sql(), timeZone: TimeZone(secondsFromGMT: 0)!)
+        let pagesResult = try await queries.breakdown(.page, range: .week, siteKey: "a", smallCellThreshold: 5, now: now)
+        let pages = try XCTUnwrap(pagesResult)
+        XCTAssertEqual(pages.series.map(\.label), ["/blog/one/", "/", "/blog/two/"])
+        let sectionsResult = try await queries.breakdown(.section, range: .day, siteKey: "a", smallCellThreshold: 5, now: now)
+        let sections = try XCTUnwrap(sectionsResult)
+        XCTAssertEqual(sections.series.map(\.label), ["/blog/", "/"])
+        XCTAssertEqual(sections.buckets.count, 24)
+        let topPages: [PageViewData.PageRow] = [.init(path: "/blog/one/", people: 6, agents: 0), .init(path: "/", people: 3, agents: 0)]
+        let browsersResult = try await queries.breakdown(.dimension(.browser), range: .day, siteKey: "a",
+                                                          smallCellThreshold: 5, pages: topPages, now: now)
+        let browsers = try XCTUnwrap(browsersResult)
+        XCTAssertTrue(browsers.isDailyFallback)
+        XCTAssertEqual(browsers.buckets.count, 2)
+        XCTAssertEqual(browsers.series.map(\.label), ["Safari", "Not recorded"])
+        XCTAssertEqual(browsers.series.map(\.total), [8, 3])
+        XCTAssertEqual(browsers.pageSplits["/blog/one/"], [6, 0])
+        XCTAssertEqual(browsers.pageSplits["/"], [0, 3])
+        let sectionSplit = try await queries.breakdown(.section, range: .week, siteKey: "a", smallCellThreshold: 5,
+                                                       pages: topPages, now: now)
+        XCTAssertEqual(sectionSplit?.pageSplits["/blog/one/"], [6, 0])
+        let none = try await queries.breakdown(.none, range: .week, siteKey: "a", smallCellThreshold: 5, now: now)
+        XCTAssertNil(none)
+    }
+}

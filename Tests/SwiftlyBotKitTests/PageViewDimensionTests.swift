@@ -265,3 +265,116 @@ final class PageViewDimensionModelTests: XCTestCase {
         XCTAssertEqual(cap.capped(facts("c"), siteKey: "s", day: tomorrow)[.campaignSource], "c")
     }
 }
+
+final class PageViewColorByTests: XCTestCase {
+
+    func testQueryValuesRoundTrip() {
+        for option in PageViewColorBy.options(dimensionsEnabled: true) {
+            XCTAssertEqual(PageViewColorBy(query: option.queryValue), option)
+        }
+        XCTAssertEqual(PageViewColorBy(query: "nonsense"), .none)
+        XCTAssertEqual(PageViewColorBy.options(dimensionsEnabled: false), [.none, .page, .section])
+        XCTAssertEqual(PageViewColorBy.options(dimensionsEnabled: true).count, 16)
+    }
+
+    private let buckets = (0..<3).map { Date(timeIntervalSince1970: Double($0) * 86_400) }
+
+    /// Ranked by total, small values and the overflow in Other, and the
+    /// views the breakdown cannot account for in Not recorded.
+    func testBuildRanksFoldsAndFillsTheGap() {
+        let rows: [(bucket: Int, value: String, count: Int)] = [
+            (0, "BE", 10), (1, "BE", 20), (2, "US", 40), (0, "LU", 2), (1, "(other)", 6),
+        ]
+        let breakdown = PageViewBreakdown.build(
+            colorBy: .dimension(.country), buckets: buckets, isDailyFallback: false,
+            rows: rows, bucketTotals: [15, 26, 40], smallCellThreshold: 5
+        )
+        XCTAssertEqual(breakdown.series.map(\.label), ["US", "BE", "Other", "Not recorded"])
+        XCTAssertEqual(breakdown.series[2].counts, [2, 6, 0])
+        XCTAssertEqual(breakdown.series[3].counts, [3, 0, 0])
+        XCTAssertEqual(breakdown.total, 81)
+        XCTAssertEqual(breakdown.color(at: 0), "var(--cat-1)")
+        XCTAssertEqual(breakdown.color(at: 2), DashboardTheme.otherColor)
+        XCTAssertEqual(breakdown.display(3), "<5")
+        XCTAssertEqual(breakdown.display(0), "0")
+        XCTAssertEqual(breakdown.display(1_234), "1,234")
+    }
+
+    func testAtMostTwentyThreeValuesKeepTheirOwnColour() {
+        let rows = (0..<30).map { (bucket: 0, value: "/page-\($0)/", count: 100 - $0) }
+        let breakdown = PageViewBreakdown.build(colorBy: .page, buckets: buckets, isDailyFallback: false,
+                                                rows: rows, bucketTotals: nil, smallCellThreshold: nil)
+        XCTAssertEqual(breakdown.series.count, 24)
+        XCTAssertEqual(breakdown.series.last?.kind, .other)
+        XCTAssertEqual(breakdown.series.last?.total, (23..<30).map { 100 - $0 }.reduce(0, +))
+        XCTAssertEqual(Set((0..<23).map(breakdown.color(at:))).count, 23)
+    }
+
+    func testTheChartCarriesTheMenuTheStackAndTheTotals() {
+        var data = PageViewData()
+        data.people = 30
+        data.distinctPages = 1
+        data.series = [.init(bucket: buckets[0], people: 30, agents: 0)]
+        let breakdown = PageViewBreakdown.build(
+            colorBy: .dimension(.referrer), buckets: [buckets[0]], isDailyFallback: false,
+            rows: [(0, "google.com", 20), (0, "<script>x</script>.com", 7), (0, "tiny.example", 3)],
+            bucketTotals: [30], smallCellThreshold: 5
+        )
+        let html = PageViewsPage.render(
+            data: data, range: .week, sites: [], selectedSite: nil, generatedAt: Date(),
+            audience: .people, colorBy: .dimension(.referrer),
+            colorOptions: PageViewColorBy.options(dimensionsEnabled: true), breakdown: breakdown
+        )
+        XCTAssertTrue(html.contains("class=\"colorby\""))
+        XCTAssertTrue(html.contains("color=utm_source"))
+        XCTAssertTrue(html.contains("aria-current=\"true\">Referrer</a>"))
+        XCTAssertTrue(html.contains("legend totals"))
+        XCTAssertTrue(html.contains("google.com"))
+        XCTAssertTrue(html.contains("var(--cat-2)"))
+        XCTAssertFalse(html.contains("<script>x"))
+        // The range pills keep the colour choice.
+        XCTAssertTrue(html.contains("range=30d&amp;color=referrer") || html.contains("range=30d&color=referrer"))
+        // The small value is folded into Other and its count masked.
+        XCTAssertFalse(html.contains("tiny.example"))
+        XCTAssertTrue(html.contains("&lt;5") || html.contains("<5</b>"))
+    }
+
+    /// A page's bar is split in the chart's colours; its popover lists the
+    /// parts largest first with the catch-alls last.
+    func testPageRowsSplitInTheChartsColours() {
+        var breakdown = PageViewBreakdown.build(
+            colorBy: .dimension(.country), buckets: [buckets[0]], isDailyFallback: false,
+            rows: [(0, "BE", 30), (0, "US", 20)], bucketTotals: [60], smallCellThreshold: 5
+        )
+        breakdown.pageSplits["/a/"] = [4, 12, 8]
+        let row = PageViewsPage.row(for: .init(path: "/a/", people: 24, agents: 0), breakdown: breakdown)
+        XCTAssertEqual(row.parts.map(\.color), ["var(--cat-1)", "var(--cat-2)", DashboardTheme.unrecordedColor])
+        XCTAssertEqual(row.details.map(\.label), ["US", "BE", "Not recorded"])
+        XCTAssertEqual(row.details[1].countLabel, "<5")
+        let html = BotCharts.barRows([row])
+        XCTAssertTrue(html.contains("fill split"))
+    }
+
+    func testChartPopoversSortDescendingAndUseTwoColumnsWhenLong() {
+        let segments = (0..<10).map { BotCharts.ColumnSegment(label: "v\($0)", color: "red", count: $0 + 1) }
+            + [BotCharts.ColumnSegment(label: "Other", color: "grey", count: 50, isRemainder: true)]
+        let html = BotCharts.columns([(buckets[0], segments)], range: .week, timeZone: TimeZone(secondsFromGMT: 0)!,
+                                     ariaLabel: "x", popoverDescending: true)
+        let v9 = html.range(of: ">v9<")!.lowerBound, v0 = html.range(of: ">v0<")!.lowerBound
+        let other = html.range(of: ">Other<")!.lowerBound
+        XCTAssertLessThan(v9, v0)
+        XCTAssertLessThan(v0, other)
+        XCTAssertTrue(html.contains("tip many"))
+        XCTAssertTrue(html.contains("tip-grid"))
+    }
+
+    func testNoMenuForOtherAudiences() {
+        var data = PageViewData()
+        data.people = 1
+        data.agents = 1
+        data.series = [.init(bucket: buckets[0], people: 1, agents: 1)]
+        let html = PageViewsPage.render(data: data, range: .week, sites: [], selectedSite: nil, generatedAt: Date(),
+                                        audience: .agents, colorOptions: PageViewColorBy.options(dimensionsEnabled: true))
+        XCTAssertFalse(html.contains("class=\"colorby\""))
+    }
+}

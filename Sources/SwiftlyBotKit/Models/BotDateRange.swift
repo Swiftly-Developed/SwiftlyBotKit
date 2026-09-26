@@ -156,6 +156,15 @@ public enum BotDateRange: String, CaseIterable, Sendable {
         /// `width_bucket` sorts rows between.
         let runs: [Run]
         var start: Date { runs.first?.start ?? buckets.first?.start ?? Date() }
+
+        /// The newest `count` buckets and their runs.
+        func suffix(_ count: Int) -> Window {
+            let dropped = max(0, buckets.count - count)
+            return Window(
+                buckets: Array(buckets.dropFirst(dropped)),
+                runs: runs.filter { $0.bucket >= dropped }.map { Run(start: $0.start, bucket: $0.bucket - dropped) }
+            )
+        }
     }
 
     /// The last `bucketCount` wall-clock hours or days up to `now`.

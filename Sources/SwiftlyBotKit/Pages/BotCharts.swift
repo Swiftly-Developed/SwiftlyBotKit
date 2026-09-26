@@ -19,6 +19,13 @@ enum BotCharts {
         let label: String
         let color: String
         let count: Int
+        /// Shown instead of the count when set, such as `<5` for a small
+        /// cell. The share is then left out too, since it would give the
+        /// count away.
+        var countLabel: String? = nil
+        /// A catch-all part (Other, Not recorded), listed after the named
+        /// ones in a popover sorted by size.
+        var isRemainder = false
     }
 
     /// One column per bucket, stacked by purpose, drawn bottom-up in
@@ -73,7 +80,8 @@ enum BotCharts {
         _ stacks: [(bucket: Date, segments: [ColumnSegment])],
         range: BotDateRange,
         timeZone: TimeZone,
-        ariaLabel: String
+        ariaLabel: String,
+        popoverDescending: Bool = false
     ) -> String {
         let width = 760.0, height = 232.0
         let left = 44.0, right = 10.0, top = 14.0, bottom = 26.0
@@ -112,7 +120,7 @@ enum BotCharts {
                 // keeps its full height; the gap always sits below the next one.
                 let drawn = max(1.5, isTop ? full : full - 2)
                 let y = cursor - full
-                let title = "<title>\(escape(range.axisLabel(for: stack.bucket, in: timeZone))) · \(escape(segment.label)): \(grouped(segment.count))</title>"
+                let title = "<title>\(escape(range.axisLabel(for: stack.bucket, in: timeZone))) · \(escape(segment.label)): \(escape(segment.countLabel ?? grouped(segment.count)))</title>"
                 if isTop {
                     let radius = min(4.0, drawn, barWidth / 2)
                     svg += "<path d=\"\(roundedTopPath(x: x, y: y, width: barWidth, height: drawn, radius: radius))\" fill=\"\(segment.color)\">\(title)</path>"
@@ -132,7 +140,8 @@ enum BotCharts {
             hits += popover(
                 title: range.popoverLabel(for: stack.bucket, in: timeZone),
                 subtitle: nil,
-                lines: segments.reversed().map { .init(label: $0.label, color: $0.color, count: $0.count) },
+                lines: popoverOrder(segments, descending: popoverDescending)
+                    .map { .init(label: $0.label, color: $0.color, count: $0.count, countLabel: $0.countLabel) },
                 total: segments.count > 1 ? segments.reduce(0) { $0 + $1.count } : nil,
                 empty: "Nothing recorded"
             )
@@ -150,7 +159,21 @@ enum BotCharts {
         return "<div class=\"plot\">" + svg + hits + "</div></div>"
     }
 
+    /// Top-down as drawn, or largest first with catch-alls last.
+    private static func popoverOrder(_ segments: [ColumnSegment], descending: Bool) -> [ColumnSegment] {
+        guard descending else { return segments.reversed() }
+        return segments.enumerated().sorted { a, b in
+            if a.element.isRemainder != b.element.isRemainder { return !a.element.isRemainder }
+            if a.element.count != b.element.count { return a.element.count > b.element.count }
+            return a.offset < b.offset
+        }.map(\.element)
+    }
+
     // MARK: - Popovers
+
+    /// Past this many lines a popover lays them out in two columns, so it
+    /// fits inside the chart without scrolling.
+    static let popoverColumnThreshold = 8
 
     /// One line of a popover: a swatch, a label and a count.
     struct PopoverLine {
@@ -160,12 +183,15 @@ enum BotCharts {
         let count: Int
         /// Share shown after the count, computed against this. `nil` shows none.
         let shareOf: Int?
+        /// Shown instead of the count, with no share, when set.
+        let countLabel: String?
 
-        init(label: String, color: String?, count: Int, shareOf: Int? = nil) {
+        init(label: String, color: String?, count: Int, shareOf: Int? = nil, countLabel: String? = nil) {
             self.label = label
             self.color = color
             self.count = count
             self.shareOf = shareOf
+            self.countLabel = countLabel
         }
     }
 
@@ -180,18 +206,23 @@ enum BotCharts {
         empty: String? = nil,
         footer: String? = nil
     ) -> String {
-        var html = "<div class=\"tip\"><div class=\"tip-title\">\(escape(title))</div>"
+        let isMany = lines.count > popoverColumnThreshold
+        var html = "<div class=\"tip\(isMany ? " many" : "")\"><div class=\"tip-title\">\(escape(title))</div>"
         if let subtitle { html += "<div class=\"tip-sub\">\(escape(subtitle))</div>" }
         if lines.isEmpty, let empty { html += "<div class=\"tip-sub\">\(escape(empty))</div>" }
+        // Down the first column, then the second, so the order still reads
+        // top to bottom.
+        if isMany { html += "<div class=\"tip-grid\" style=\"grid-template-rows:repeat(\((lines.count + 1) / 2),auto)\">" }
         for line in lines {
             html += "<div class=\"tip-line\">"
             html += line.color.map { "<i style=\"background:\($0)\"></i>" } ?? "<i class=\"none\"></i>"
-            html += "<span>\(escape(line.label))</span><b>\(grouped(line.count))"
-            if let whole = line.shareOf ?? total, whole > 0 {
+            html += "<span>\(escape(line.label))</span><b>\(escape(line.countLabel ?? grouped(line.count)))"
+            if line.countLabel == nil, let whole = line.shareOf ?? total, whole > 0 {
                 html += "<em>\(share(line.count, of: whole))</em>"
             }
             html += "</b></div>"
         }
+        if isMany { html += "</div>" }
         if let total { html += "<div class=\"tip-line tip-total\"><i class=\"none\"></i><span>Total</span><b>\(grouped(total))</b></div>" }
         if let footer { html += "<div class=\"tip-sub tip-foot\">\(escape(footer))</div>" }
         return html + "</div>"
@@ -237,6 +268,9 @@ enum BotCharts {
         let details: [PopoverLine]
         /// Grey line at the foot of the popover.
         let detailNote: String?
+        /// When set, the bar is drawn as these parts side by side, each as
+        /// wide as its share of their sum, instead of in `color`.
+        var parts: [(color: String, count: Int)] = []
 
         init(
             name: String,
@@ -277,15 +311,24 @@ enum BotCharts {
             html += "</div><div class=\"num\">\(grouped(row.value))"
             if let note = row.note { html += "<span class=\"meta\"> \(escape(note))</span>" }
             html += "</div></div>"
-            html += "<div class=\"track\"><div class=\"fill\" style=\"width:\(fmt(share))%;background:\(row.color)\">"
-            // Two shades of one hue rather than two hues: it is one measure
-            // split in two, not two independent series.
-            if let highlight = row.highlight, highlight > 0, let color = row.highlightColor {
-                let portion = min(100, Double(highlight) / Double(max(row.value, 1)) * 100)
-                let isWhole = portion >= 99.5
-                html += "<div class=\"seg\(isWhole ? " whole" : "")\" style=\"width:\(fmt(portion))%;background:\(color)\"></div>"
+            let partsTotal = row.parts.reduce(0) { $0 + $1.count }
+            if partsTotal > 0 {
+                html += "<div class=\"track\"><div class=\"fill split\" style=\"width:\(fmt(share))%\">"
+                for part in row.parts where part.count > 0 {
+                    html += "<div class=\"seg\" style=\"width:\(fmt(Double(part.count) / Double(partsTotal) * 100))%;background:\(part.color)\"></div>"
+                }
+                html += "</div></div>"
+            } else {
+                html += "<div class=\"track\"><div class=\"fill\" style=\"width:\(fmt(share))%;background:\(row.color)\">"
+                // Two shades of one hue rather than two hues: it is one measure
+                // split in two, not two independent series.
+                if let highlight = row.highlight, highlight > 0, let color = row.highlightColor {
+                    let portion = min(100, Double(highlight) / Double(max(row.value, 1)) * 100)
+                    let isWhole = portion >= 99.5
+                    html += "<div class=\"seg\(isWhole ? " whole" : "")\" style=\"width:\(fmt(portion))%;background:\(color)\"></div>"
+                }
+                html += "</div></div>"
             }
-            html += "</div></div>"
             // Opens under the end of the bar, clamped inside the row by CSS.
             let lines = row.details.isEmpty
                 ? [PopoverLine(label: "Total", color: row.color, count: row.value)]

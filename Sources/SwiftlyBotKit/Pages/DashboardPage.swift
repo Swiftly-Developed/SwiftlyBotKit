@@ -120,7 +120,8 @@ enum DashboardPage {
         ranges: [BotDateRange],
         sites: [BotDashboardSite],
         selectedSite: BotDashboardSite?,
-        audience: PageViewAudience? = nil
+        audience: PageViewAudience? = nil,
+        colorBy: PageViewColorBy = .none
     ) -> some HTML {
         div(.class("filters")) {
             if sections.count > 1 {
@@ -130,7 +131,7 @@ enum DashboardPage {
             // single-site app gets the range pills alone.
             if sites.count > 1 {
                 siteSwitcher(base: base, section: section, range: range, sites: sites,
-                             selectedSite: selectedSite, audience: audience)
+                             selectedSite: selectedSite, audience: audience, colorBy: colorBy)
             }
             if let audience {
                 nav(.class("pills"), .custom(name: "aria-label", value: "Whose reads")) {
@@ -151,7 +152,7 @@ enum DashboardPage {
                     for option in ranges {
                         a(
                             .href(dashboardURL(base: base, section: section, siteKey: selectedSite?.key ?? "all",
-                                               range: option, audience: audience)),
+                                               range: option, audience: audience, colorBy: colorBy)),
                             .class(option == range ? "pill on" : "pill")
                         ) { option.shortLabel }
                     }
@@ -191,7 +192,8 @@ enum DashboardPage {
         range: BotDateRange,
         sites: [BotDashboardSite],
         selectedSite: BotDashboardSite?,
-        audience: PageViewAudience?
+        audience: PageViewAudience?,
+        colorBy: PageViewColorBy
     ) -> some HTML {
         details(.class("switcher")) {
             summary(.custom(name: "aria-label", value: "Site: \(selectedSite?.name ?? "All sites")")) {
@@ -201,10 +203,10 @@ enum DashboardPage {
             }
             div(.class("menu")) {
                 switcherLink(nil, base: base, section: section, sites: sites, range: range, audience: audience,
-                             isCurrent: selectedSite == nil)
+                             colorBy: colorBy, isCurrent: selectedSite == nil)
                 ForEach(sites) { site in
                     switcherLink(site, base: base, section: section, sites: sites, range: range, audience: audience,
-                                 isCurrent: site == selectedSite)
+                                 colorBy: colorBy, isCurrent: site == selectedSite)
                 }
             }
         }
@@ -218,9 +220,11 @@ enum DashboardPage {
         sites: [BotDashboardSite],
         range: BotDateRange,
         audience: PageViewAudience?,
+        colorBy: PageViewColorBy,
         isCurrent: Bool
     ) -> some HTML {
-        let href = dashboardURL(base: base, section: section, siteKey: site?.key ?? "all", range: range, audience: audience)
+        let href = dashboardURL(base: base, section: section, siteKey: site?.key ?? "all", range: range,
+                                audience: audience, colorBy: colorBy)
         if isCurrent {
             a(.href(href), .class("on"), .custom(name: "aria-current", value: "page")) {
                 siteMark(site, sites: sites)
@@ -250,19 +254,23 @@ enum DashboardPage {
         }
     }
 
-    /// `audience` is kept only on the page views tab, and only when it is not
-    /// the default, so the common links stay short.
+    /// `audience` and `colorBy` are kept only on the page views tab, and only
+    /// when they are not the default, so the common links stay short.
     static func dashboardURL(
         base: String,
         section: DashboardSection,
         siteKey: String,
         range: BotDateRange,
-        audience: PageViewAudience? = nil
+        audience: PageViewAudience? = nil,
+        colorBy: PageViewColorBy = .none
     ) -> String {
         let key = siteKey.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? siteKey
         var url = "\(base)\(section.pathSuffix)?site=\(key)&range=\(range.rawValue)"
         if section == .pageViews, let audience, audience != .people {
             url += "&audience=\(audience.rawValue)"
+        }
+        if section == .pageViews, let color = colorBy.queryValue {
+            url += "&color=\(color)"
         }
         return url
     }

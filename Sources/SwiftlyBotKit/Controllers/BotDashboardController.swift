@@ -88,8 +88,17 @@ struct BotDashboardController: RouteCollection {
         guard let sql = database(req) else { return unavailable(req) }
         let (range, site) = filters(req)
         let audience = PageViewAudience(query: req.query[String.self, at: "audience"])
-        let data = try await PageViewQueries(database: sql, timeZone: options.timeZone.foundationTimeZone)
-            .load(range: range, siteKey: site?.key, audience: audience)
+        let dimensions = config.pageViews.dimensions
+        var colorBy = PageViewColorBy(query: req.query[String.self, at: "color"])
+        if !PageViewColorBy.options(dimensionsEnabled: dimensions.isEnabled).contains(colorBy) { colorBy = .none }
+        let queries = PageViewQueries(database: sql, timeZone: options.timeZone.foundationTimeZone)
+        let data = try await queries.load(range: range, siteKey: site?.key, audience: audience)
+        // The breakdowns are of people's page views only.
+        let breakdown = audience == .people
+            ? try await queries.breakdown(colorBy, range: range, siteKey: site?.key,
+                                          smallCellThreshold: dimensions.effectiveSmallCellThreshold,
+                                          pages: data.topPages)
+            : nil
 
         return html(PageViewsPage.render(
             data: data,
@@ -98,7 +107,10 @@ struct BotDashboardController: RouteCollection {
             selectedSite: site,
             generatedAt: Date(),
             options: options,
-            audience: audience
+            audience: audience,
+            colorBy: colorBy,
+            colorOptions: PageViewColorBy.options(dimensionsEnabled: dimensions.isEnabled),
+            breakdown: breakdown
         ))
     }
 

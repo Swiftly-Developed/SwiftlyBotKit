@@ -27,6 +27,27 @@ enum DashboardTheme {
         "var(\(seriesVariable(for: purpose)))"
     }
 
+    /// How many colours the "Color by" chart has for individual values.
+    /// Beyond them, values are folded into "Other".
+    static let categoryCount = 24
+
+    /// The colour for the value ranked `rank` (0 = largest) in a "Color by"
+    /// breakdown.
+    ///
+    /// Twelve hues in an order that keeps neighbours far apart, then the
+    /// same twelve again as a lighter (light theme) or deeper (dark theme)
+    /// step, so a value's colour is never mistaken for the one stacked next
+    /// to it. With up to 24 values colour alone cannot carry identity, which
+    /// is why every legend entry and popover line names its value and count.
+    static func categoryColor(rank: Int) -> String {
+        "var(--cat-\((rank % categoryCount) + 1))"
+    }
+
+    /// Everything folded together beyond the top values.
+    static let otherColor = "var(--cat-other)"
+    /// Views that have no value for the chosen breakdown.
+    static let unrecordedColor = "var(--cat-unrecorded)"
+
     static let css = """
     *{box-sizing:border-box}
     :root{
@@ -37,6 +58,11 @@ enum DashboardTheme {
       --series-1:#2a78d6; --series-2:#eb6834; --series-3:#1baf7a; --series-4:#eda100; --series-5:#e87ba4;
       --series-1-soft:#86b6ef;
       --critical:#d03b3b; --good:#006300;
+      --cat-1:#2a78d6; --cat-2:#eb6834; --cat-3:#1baf7a; --cat-4:#e87ba4; --cat-5:#eda100; --cat-6:#8b5cf6;
+      --cat-7:#0e9fb5; --cat-8:#d03b3b; --cat-9:#7cb82f; --cat-10:#a86b3c; --cat-11:#5b6ee1; --cat-12:#c052c9;
+      --cat-13:#86b6ef; --cat-14:#f6a57f; --cat-15:#74d3ae; --cat-16:#f3b3cc; --cat-17:#f5cb5c; --cat-18:#bda4fa;
+      --cat-19:#6dcfdd; --cat-20:#ec8b8b; --cat-21:#b5dd7a; --cat-22:#d2a47f; --cat-23:#a3aef0; --cat-24:#e29be7;
+      --cat-other:#898781; --cat-unrecorded:#d6d5ce;
     }
     @media (prefers-color-scheme:dark){
       :root:not([data-theme="light"]){
@@ -47,6 +73,11 @@ enum DashboardTheme {
         --series-1:#3987e5; --series-2:#d95926; --series-3:#199e70; --series-4:#c98500; --series-5:#d55181;
         --series-1-soft:#184f95;
         --critical:#d03b3b; --good:#0ca30c;
+        --cat-1:#3987e5; --cat-2:#d95926; --cat-3:#199e70; --cat-4:#d55181; --cat-5:#c98500; --cat-6:#9f7aea;
+        --cat-7:#1bb3c9; --cat-8:#e05252; --cat-9:#8bc34a; --cat-10:#b97a4b; --cat-11:#6f7fe8; --cat-12:#cd67d6;
+        --cat-13:#184f95; --cat-14:#8f3a17; --cat-15:#0f6b4b; --cat-16:#8e3457; --cat-17:#8a5c00; --cat-18:#5b3fa8;
+        --cat-19:#0e6f7e; --cat-20:#962f2f; --cat-21:#52802c; --cat-22:#7a4f2f; --cat-23:#3a47a3; --cat-24:#85368c;
+        --cat-other:#6f6e69; --cat-unrecorded:#3a3a37;
       }
     }
     body{margin:0;background:var(--page);color:var(--text-primary);
@@ -100,6 +131,24 @@ enum DashboardTheme {
     .cols{display:grid;grid-template-columns:1fr 1fr;gap:20px}
     @media (max-width:820px){.cols{grid-template-columns:1fr}}
 
+    /* Chart card header with the "Color by" menu on the right */
+    .card-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:4px}
+    .card-head h2{min-width:0}
+    .colorby{position:relative;flex:none}
+    .colorby summary{list-style:none;display:flex;align-items:center;gap:6px;padding:5px 10px;border-radius:8px;
+      border:1px solid var(--border);background:var(--surface-1);cursor:pointer;font-size:12.5px;font-weight:600;
+      color:var(--text-secondary);white-space:nowrap}
+    .colorby summary::-webkit-details-marker{display:none}
+    .colorby summary b{color:var(--text-primary);font-weight:650}
+    .colorby summary:focus-visible,.colorby .menu a:focus-visible{outline:2px solid var(--series-1);outline-offset:2px}
+    .colorby .menu{position:absolute;right:0;top:calc(100% + 6px);z-index:30;min-width:200px;max-height:360px;overflow-y:auto;
+      padding:5px;background:var(--surface-1);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18)}
+    .colorby .menu a{display:block;padding:6px 10px;border-radius:6px;font-size:13px;font-weight:600;color:var(--text-primary);text-decoration:none}
+    .colorby .menu a:hover,.colorby .menu a.on{background:var(--grid)}
+    .colorby .menu .group{padding:8px 10px 3px;font-size:11px;font-weight:650;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+    .legend.totals{gap:8px 20px}
+    .legend.totals em{font-style:normal;color:var(--muted);font-variant-numeric:tabular-nums}
+
     /* Legend: every entry carries its own count, which is the relief the
        light palette's sub-3:1 steps require. */
     .legend{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:14px}
@@ -117,6 +166,9 @@ enum DashboardTheme {
     .fill{height:100%;border-radius:0 4px 4px 0}
     .fill .seg{height:100%;border-right:2px solid var(--surface-1)}
     .fill .seg.whole{border-right:0;border-radius:0 4px 4px 0}
+    .fill.split{display:flex;overflow:hidden}
+    .fill.split .seg{flex:none}
+    .fill.split .seg:last-child{border-right:0}
 
     .tag{display:inline-block;padding:0 6px;border-radius:999px;font-size:11px;font-weight:650;
       border:1px solid var(--border);color:var(--text-secondary);margin-left:6px}
@@ -151,10 +203,14 @@ enum DashboardTheme {
     .tip-line b{color:var(--text-primary);font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
     .tip-line em{font-style:normal;font-weight:400;color:var(--muted);margin-left:6px}
     .tip-total{border-top:1px solid var(--border);padding-top:4px;margin-top:6px}
+    .tip.many{max-width:min(440px,calc(100vw - 40px))}
+    .tip-grid{display:grid;grid-auto-flow:column;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:18px}
+    .tip.many .tip-line{margin-top:3px;min-width:150px}
     /* A row's popover opens under the end of its bar, kept inside the row. */
     .row{position:relative;outline:none}
     .row .pop{position:absolute;left:0;right:0;top:100%}
     .row .tip{top:4px;width:240px;max-width:100%;left:clamp(0px,calc(var(--at) - 120px),calc(100% - 240px))}
+    .row .tip.many{width:420px;left:clamp(0px,calc(var(--at) - 210px),calc(100% - 420px))}
     .row:hover .track,.row:focus .track{background:var(--baseline)}
 
     /* Export form. No script: the custom dates are dimmed, not hidden, when
