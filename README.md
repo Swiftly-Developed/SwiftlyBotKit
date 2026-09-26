@@ -260,6 +260,26 @@ dashboard are skipped.
 | `isEnabled` | `false` | Count page views and show the tab. |
 | `flushInterval` | 10 seconds | How often the in-memory counts are written, in one statement. A killed process loses at most this much. |
 | `maximumPendingCounters` | `10_000` | Distinct site, path and quarter-hour counters held between writes. Beyond it new ones are dropped with a sampled warning. |
+| `dimensions` | off | Anonymous breakdowns, below. |
+
+### Dimensions and Color by
+
+`config.pageViews.dimensions.isEnabled = true` also breaks each view down by
+13 coarse values: country, referring host, previous page, four `utm_` tags,
+device type, browser and version, OS and version, language. They are derived
+in memory, the raw headers, IP and query string are dropped, and only per-day
+counts are written: one dimension per page in `page_view_dimension_counts`, two
+dimensions per site in `page_view_pair_counts`, never three in a row. The
+country comes from a local table (`countryDatabasePath`) built with
+`python3 Scripts/update-country-database.py OUTPUT.bin` from DB-IP's free
+country database; the IP never leaves the process. Pass
+`pageViewDimensions: true` to `BotKit.configure` when you register migrations
+separately.
+
+The Page views chart then has a **Color by** menu that stacks every bar by
+page, section or any dimension, lists each value's total in its colour under
+the chart, and splits each of the most-read pages the same way. Values under
+`smallCellThreshold` (default 5) are counted in Other.
 
 ## Exporting to CSV
 

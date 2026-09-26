@@ -55,7 +55,7 @@ try BotKit.install(on: app, config: config)
 try await app.autoMigrate()
 ```
 
-An app that registers migrations and routes separately passes `pageViews: true` to ``BotKit/configure(for:database:pageViews:)`` as well. ``BotKit/configureRoutes(for:config:)`` throws ``BotKitConfigurationError/pageViewsNotMigrated`` when counting is on but the table was not registered.
+An app that registers migrations and routes separately passes `pageViews: true` to ``BotKit/configure(for:database:pageViews:pageViewDimensions:)`` as well. ``BotKit/configureRoutes(for:config:)`` throws ``BotKitConfigurationError/pageViewsNotMigrated`` when counting is on but the table was not registered.
 
 ### Cost
 
@@ -63,9 +63,36 @@ Counting a view is a lock and a dictionary increment on the request path, after 
 
 Memory is bounded by ``BotKitConfiguration/PageViews/maximumPendingCounters``: the distinct site, path and quarter-hour counters held between writes. Paths come only from successful HTML responses, so an app that answers `404` for unknown paths cannot be made to grow it, but an app with a catch-all route could, and the cap stops that.
 
+### Dimensions
+
+With ``BotKitConfiguration/PageViews/Dimensions`` on, each counted view is also summarised into one coarse value per ``PageViewDimension``: country, referring host, previous page on the same site, the four `utm_` campaign tags, device type, browser, browser version, operating system, OS version and language. The summary is built in memory from the request and the raw headers, IP address and query string are dropped. Only counts are written:
+
+| Table | Key | Answers |
+|---|---|---|
+| `page_view_dimension_counts` | site, day, dimension, value, path | any dimension by page |
+| `page_view_pair_counts` | site, day, two dimensions and their values | any two dimensions against each other |
+
+Days, not quarter-hours, and never more than two dimensions in a row, so each count describes many readers rather than one. Values come from closed lists or are sanitised: a host name but never a path, a campaign token only when it is plain letters, digits, `.`, `_` and `-` without a long run of digits, a browser family and a major version. `utm_term` is not read. An IP-literal referrer, an email address in a campaign link and anything else that could carry a person is stored as `(other)`.
+
+The country is looked up in a local table (``CountryLookup``) built by `Scripts/update-country-database.py` from DB-IP's free country database; set ``BotKitConfiguration/PageViews/Dimensions/countryDatabasePath`` to it. The address is never sent anywhere. Without a table the country is simply left out.
+
+```swift
+config.pageViews.isEnabled = true
+config.pageViews.dimensions.isEnabled = true
+config.pageViews.dimensions.countryDatabasePath = "Data/country-ranges.bin"
+```
+
+An app that registers migrations separately passes `pageViewDimensions: true` to ``BotKit/configure(for:database:pageViews:pageViewDimensions:)``.
+
+### Color by
+
+The chart on the Page views tab has a **Color by** menu (`?color=`, kept by every link on the tab). **None** draws one colour per bar. **Page** and **Section** (the first path segment) stack each bar by page, at the range's own buckets. Any dimension stacks it by that dimension's values; those are stored per day, so on the 24-hour range the chart shows yesterday and today as two daily bars.
+
+Values are ranked by their total in the period and drawn in up to 23 colours, largest at the baseline; the rest go into **Other**. Page views with no value for the dimension, counted before dimensions were switched on or without a country table, show as **Not recorded**, so every bar still adds up to the page views. Under the chart, every value's total for the period is listed in its colour, and each page in **Most-read pages** is split the same way. Values with fewer views than ``BotKitConfiguration/PageViews/Dimensions/smallCellThreshold`` (default 5) are counted in Other, and counts under it are shown as `<5`.
+
 ### Privacy notices
 
-Whether a notice is required is a legal question for your jurisdiction, not something this package can settle. What it can tell you is exactly what is processed: the request headers above are read to decide whether to count, then discarded, and only the four columns are kept. Nothing is stored on the visitor's device.
+Whether a notice is required is a legal question for your jurisdiction, not something this package can settle. What it can tell you is exactly what is processed: the request headers above are read to decide whether to count, then discarded, and only the four columns are kept. With dimensions on, the IP address is briefly processed to look up the country, which in the EU is processing of personal data even though nothing is kept, so name it in your privacy notice (legitimate interest is the usual basis). Nothing is stored on the visitor's device.
 
 ## Topics
 

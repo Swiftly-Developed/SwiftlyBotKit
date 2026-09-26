@@ -206,13 +206,13 @@ public enum BotKit {
         ))
     }
 
-    /// ``configure(for:database:pageViews:)`` and ``configureRoutes(for:config:)`` in one call.
+    /// ``configure(for:database:pageViews:pageViewDimensions:)`` and ``configureRoutes(for:config:)`` in one call.
     ///
     /// Call after adding `FileMiddleware` and before `app.autoMigrate()`. Do
-    /// not also call ``configure(for:database:pageViews:)``.
+    /// not also call ``configure(for:database:pageViews:pageViewDimensions:)``.
     ///
     /// - Throws: ``BotKitConfigurationError/alreadyInstalled(_:)`` when
-    ///   ``configure(for:database:pageViews:)``, ``configureRoutes(for:config:)`` or
+    ///   ``configure(for:database:pageViews:pageViewDimensions:)``, ``configureRoutes(for:config:)`` or
     ///   `install` already ran on this application, and any other
     ///   ``BotKitConfigurationError`` ``configureRoutes(for:config:)`` throws.
     ///   Nothing is registered when it throws.
