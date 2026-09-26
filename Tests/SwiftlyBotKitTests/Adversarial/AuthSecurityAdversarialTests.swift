@@ -710,7 +710,7 @@ final class AuthSecurityAdversarialTests_RequestForgeryAndHeaderAdversarialTests
             XCTAssertEqual(res.headers.first(name: .cacheControl), "no-store")
             XCTAssertEqual(
                 res.headers.first(name: "Content-Security-Policy"),
-                "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
+                "default-src 'none'; script-src \(ViewerTimeZone.cspSource); style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
             )
         }
     }
@@ -727,7 +727,8 @@ final class AuthSecurityAdversarialTests_RequestForgeryAndHeaderAdversarialTests
             "javascript:alert(1)",
         ])
         XCTAssertTrue(csp.contains("img-src 'self' data: https://cdn.example.com http://x.example:8080;"), csp)
-        XCTAssertFalse(csp.contains("script-src"))
+        XCTAssertFalse(csp.contains("script-src *"))
+        XCTAssertEqual(csp.components(separatedBy: "script-src").count, 2, "only the policy's own script-src")
         XCTAssertFalse(csp.contains("javascript"))
     }
 

@@ -226,7 +226,9 @@ final class ExportPageTests: XCTestCase {
         XCTAssertTrue(html.contains("name=\"site\" value=\"b\""))
         XCTAssertTrue(html.contains("name=\"range\" value=\"30d\" checked"))
         XCTAssertTrue(html.contains("name=\"people\""))
-        XCTAssertFalse(html.contains("<script"))
+        // The time zone script only.
+        XCTAssertEqual(html.components(separatedBy: "<script").count, 2)
+        XCTAssertTrue(html.contains(">\(ViewerTimeZone.source)</script>"))
         XCTAssertFalse(html.lowercased().contains("ip_hash"))
     }
 

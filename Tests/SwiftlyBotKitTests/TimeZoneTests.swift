@@ -1,5 +1,6 @@
 import XCTest
 import FluentKit
+import Vapor
 @testable import SwiftlyBotKit
 
 final class TimeZoneTests: XCTestCase {
@@ -117,5 +118,49 @@ final class TimeZoneTests: XCTestCase {
     func testDatabaseDefaultsToTheAppsDefaultDatabase() {
         XCTAssertNil(BotKitConfiguration().database)
         XCTAssertEqual(BotKitConfiguration(database: DatabaseID(string: "analytics")).database, DatabaseID(string: "analytics"))
+    }
+}
+
+/// The dashboard is drawn in the viewer's zone, read from a cookie the page's
+/// script sets, and falls back to the configured zone.
+final class ViewerTimeZoneTests: XCTestCase {
+
+    private let options: BotKitConfiguration.Dashboard = {
+        var options = BotKitConfiguration.Dashboard.default
+        options.timeZone = .europeBrussels
+        return options
+    }()
+
+    private func resolve(_ cookie: String?) -> BotKitTimeZone {
+        var headers = HTTPHeaders()
+        if let cookie { headers.add(name: .cookie, value: cookie) }
+        return ViewerTimeZone.resolve(headers: headers, options: options)
+    }
+
+    func testUsesTheBrowserZoneFromTheCookie() {
+        XCTAssertEqual(resolve("botkit_dashboard_tz=America%2FLos_Angeles"), .americaLosAngeles)
+        XCTAssertEqual(resolve("other=1; botkit_dashboard_tz=Asia/Tokyo"), .asiaTokyo)
+        XCTAssertEqual(resolve("botkit_dashboard_tz=Asia%2FCalcutta"), .asiaKolkata)
+    }
+
+    func testFallsBackToTheConfiguredZone() {
+        XCTAssertEqual(resolve(nil), .europeBrussels)
+        for bad in ["", "Mars/Olympus_Mons", "<script>", "America%2FNew_York%0A", String(repeating: "A", count: 80),
+                    "..%2F..%2Fetc%2Fpasswd"] {
+            XCTAssertEqual(resolve("botkit_dashboard_tz=\(bad)"), .europeBrussels, bad)
+        }
+    }
+
+    func testTheCookieIsNamedAfterTheSessionCookie() {
+        var custom = options
+        custom.sessionCookieName = "admin"
+        XCTAssertEqual(ViewerTimeZone.cookieName(custom), "admin_tz")
+    }
+
+    /// The rendered page carries the script the CSP hash allows, verbatim.
+    func testRenderedScriptMatchesThePolicyHash() {
+        let html = LoginPage.render(error: nil, options: options)
+        XCTAssertTrue(html.contains(">\(ViewerTimeZone.source)</script>"))
+        XCTAssertTrue(ViewerTimeZone.cspSource.hasPrefix("'sha256-"))
     }
 }
