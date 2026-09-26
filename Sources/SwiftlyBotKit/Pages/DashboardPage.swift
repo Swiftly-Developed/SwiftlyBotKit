@@ -36,8 +36,9 @@ enum DashboardSection: Sendable, CaseIterable {
 
 /// The dashboard page, at `BotKitConfiguration.Dashboard.path`.
 ///
-/// Self-contained on purpose: no Tailwind CDN, no shared site layout, no
-/// JavaScript. It is an owner-facing page behind a password, so it should
+/// Self-contained on purpose: no Tailwind CDN, no shared site layout, and no
+/// JavaScript beyond ``ViewerTimeZone``'s few lines, without which it still
+/// renders, in the configured zone. It is an owner-facing page behind a password, so it should
 /// render identically whether or not a CDN is reachable, and it must never pull
 /// the public sites' consent or analytics chrome into an admin view.
 enum DashboardPage {
@@ -62,6 +63,7 @@ enum DashboardPage {
                 meta(.name("robots"), .content("noindex, nofollow"))
                 Elementary.title { [options.title, siteName].compactMap { $0 }.joined(separator: " \u{00B7} ") }
                 style { HTMLRaw(DashboardTheme.css) }
+                ViewerTimeZone.element(options, reloads: true)
             }
             body {
                 main {

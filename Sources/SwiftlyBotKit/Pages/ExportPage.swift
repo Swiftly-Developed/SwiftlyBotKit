@@ -32,6 +32,7 @@ enum ExportPage {
                     [DashboardSection.export.label, siteName, options.title].compactMap { $0 }.joined(separator: " \u{00B7} ")
                 }
                 style { HTMLRaw(DashboardTheme.css) }
+                ViewerTimeZone.element(options, reloads: true)
             }
             body {
                 main {

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The dashboard, page views and export are drawn in the time zone of the
+  browser viewing them, not the configured one: charts, buckets, the
+  "generated" time and custom export dates. A few lines of inline script
+  store the browser's IANA zone in a `<sessionCookieName>_tz` cookie scoped
+  to the dashboard path. Without script, or for a zone the host does not
+  know, `dashboard.timeZone` is used as before, and the caption names the
+  zone actually used.
+- **The `Content-Security-Policy` now has a `script-src`** allowing that one
+  script by its SHA-256 hash, and nothing else.
+
 ## [0.6.0] - 2026-09-26
 
 ### Added

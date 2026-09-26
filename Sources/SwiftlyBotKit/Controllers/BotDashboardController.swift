@@ -66,6 +66,7 @@ struct BotDashboardController: RouteCollection {
         }
         guard let sql = database(req) else { return unavailable(req) }
         let (range, site) = filters(req)
+        let options = ViewerTimeZone.options(for: req.headers, self.options)
         let data = try await BotDashboardQueries(database: sql, timeZone: options.timeZone.foundationTimeZone)
             .load(range: range, siteKey: site?.key)
 
@@ -88,6 +89,7 @@ struct BotDashboardController: RouteCollection {
         guard let sql = database(req) else { return unavailable(req) }
         let (range, site) = filters(req)
         let audience = PageViewAudience(query: req.query[String.self, at: "audience"])
+        let options = ViewerTimeZone.options(for: req.headers, self.options)
         let data = try await PageViewQueries(database: sql, timeZone: options.timeZone.foundationTimeZone)
             .load(range: range, siteKey: site?.key, audience: audience)
 
@@ -118,6 +120,7 @@ struct BotDashboardController: RouteCollection {
             return html(LoginPage.render(error: nil, options: options))
         }
         let (_, site) = filters(req)
+        let options = ViewerTimeZone.options(for: req.headers, self.options)
         return html(ExportPage.render(
             options: exportOptions(req),
             sites: config.sites,
@@ -139,6 +142,7 @@ struct BotDashboardController: RouteCollection {
         }
         guard let sql = database(req) else { return unavailable(req) }
         let (_, site) = filters(req)
+        let options = ViewerTimeZone.options(for: req.headers, self.options)
         let submitted = exportOptions(req)
         let plan: BotExportPlan
         do {
@@ -446,9 +450,9 @@ struct BotDashboardController: RouteCollection {
 
     // MARK: - Responses
 
-    /// The page needs no script and loads nothing from elsewhere, except site
-    /// logos, which may be absolute URLs: their origins are added to
-    /// `img-src`. Inline `<style>`, `style=` attributes and inline SVG need
+    /// The page loads nothing from elsewhere, except site logos, which may be
+    /// absolute URLs: their origins are added to `img-src`. Its one script,
+    /// ``ViewerTimeZone``, is allowed by hash. Inline `<style>`, `style=` attributes and inline SVG need
     /// only `style-src 'unsafe-inline'`.
     static func contentSecurityPolicy(logoPaths: [String]) -> String {
         var imageSources = ["'self'", "data:"]
@@ -462,7 +466,7 @@ struct BotDashboardController: RouteCollection {
             let source = "\(scheme)://\(host)" + (components.port.map { ":\($0)" } ?? "")
             if !imageSources.contains(source) { imageSources.append(source) }
         }
-        return "default-src 'none'; style-src 'unsafe-inline'; img-src \(imageSources.joined(separator: " ")); "
+        return "default-src 'none'; script-src \(ViewerTimeZone.cspSource); style-src 'unsafe-inline'; img-src \(imageSources.joined(separator: " ")); "
             + "form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
     }
 

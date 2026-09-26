@@ -68,7 +68,7 @@ enum BotCharts {
     /// Returns a `.plot` wrapper: the SVG, then an HTML layer of one hover
     /// target per bucket, placed in percentages of the same viewBox so it lines
     /// up at any width. Hovering (or tapping) a column opens its popover.
-    /// CSS only: the dashboard's CSP allows no script.
+    /// CSS only: the dashboard's CSP allows no script but ``ViewerTimeZone``.
     static func columns(
         _ stacks: [(bucket: Date, segments: [ColumnSegment])],
         range: BotDateRange,

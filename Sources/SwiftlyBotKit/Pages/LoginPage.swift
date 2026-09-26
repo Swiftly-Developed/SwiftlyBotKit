@@ -17,6 +17,7 @@ enum LoginPage {
                 meta(.name("robots"), .content("noindex, nofollow"))
                 Elementary.title { "Sign in \u{00B7} \(options.title)" }
                 style { HTMLRaw(DashboardTheme.css + Self.css + Self.colorCSS(options.signInPage)) }
+                ViewerTimeZone.element(options, reloads: false)
             }
             body {
                 main(.class("login")) {
