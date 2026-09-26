@@ -34,6 +34,16 @@ final class PageViewDimensionIntegrationTests: PostgresIntegrationTestCase {
         XCTAssertEqual(pairColumns, ["day", "first_dimension", "first_value", "second_dimension", "second_value", "site_key", "views"])
     }
 
+    /// The migrations revert cleanly, so a rolled-back deploy can drop them.
+    func testTheMigrationsRevert() async throws {
+        _ = try await install()
+        try await app.autoRevert()
+        let row = try await sql().raw("""
+            SELECT to_regclass('page_view_dimension_counts') IS NULL AND to_regclass('page_view_pair_counts') IS NULL AS gone
+            """).first()
+        XCTAssertEqual(try row?.decode(column: "gone", as: Bool.self), true)
+    }
+
     func testTheTablesAreOnlyCreatedWhenEnabled() async throws {
         var config = baseConfiguration()
         config.pageViews.isEnabled = true
