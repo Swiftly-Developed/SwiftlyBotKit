@@ -94,6 +94,10 @@ struct PageViewBreakdown: Sendable, Equatable {
     /// count per entry of ``series``, in the same order. Over the chart's
     /// buckets, so yesterday and today when ``isDailyFallback``.
     var pageSplits: [String: [Int]] = [:]
+    /// The zone the buckets are days in, for a dimension: the zone the days
+    /// were stored in, which the chart then draws in whatever the viewer's
+    /// own zone. `nil` for the page breakdowns, drawn in the viewer's zone.
+    var dayTimeZone: TimeZone?
 
     var total: Int { series.reduce(0) { $0 + $1.total } }
 

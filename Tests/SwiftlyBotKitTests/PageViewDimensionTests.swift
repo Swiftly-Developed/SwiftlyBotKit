@@ -368,6 +368,21 @@ final class PageViewColorByTests: XCTestCase {
         XCTAssertTrue(html.contains("tip-grid"))
     }
 
+    /// A dimension's days are the zone they were stored in; a viewer in
+    /// another zone is told so rather than shown shifted days.
+    func testDimensionChartsNameTheZoneTheirDaysAreIn() {
+        var breakdown = PageViewBreakdown.build(colorBy: .dimension(.country), buckets: [buckets[0]], isDailyFallback: false,
+                                                rows: [(0, "BE", 9)], bucketTotals: [9], smallCellThreshold: 5)
+        breakdown.dayTimeZone = TimeZone(identifier: "Europe/Brussels")
+        let hint = PageViewsPage.chartHint(PageViewData(), range: .week, timeZone: TimeZone(identifier: "Asia/Manila")!,
+                                           audience: .people, breakdown: breakdown)
+        XCTAssertTrue(hint.hasPrefix("Daily buckets, Europe/Brussels."))
+        XCTAssertTrue(hint.contains("counted per Europe/Brussels day"))
+        let same = PageViewsPage.chartHint(PageViewData(), range: .week, timeZone: TimeZone(identifier: "Europe/Brussels")!,
+                                           audience: .people, breakdown: breakdown)
+        XCTAssertFalse(same.contains("counted per"))
+    }
+
     func testNoMenuForOtherAudiences() {
         var data = PageViewData()
         data.people = 1

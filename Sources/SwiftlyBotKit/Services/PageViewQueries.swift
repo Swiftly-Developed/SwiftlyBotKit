@@ -220,6 +220,10 @@ struct PageViewQueries: Sendable {
     /// and today. Its values under `smallCellThreshold` are folded into Other,
     /// and page views with no value for it (counted before the dimensions
     /// were on, or without a country table) are added to Other.
+    ///
+    /// For a dimension, `timeZone` must be the zone the counter stored the
+    /// days in (``BotKitConfiguration/Dashboard/timeZone``), not the viewer's:
+    /// a stored day cannot be split or shifted.
     func breakdown(
         _ colorBy: PageViewColorBy,
         range: BotDateRange,
@@ -288,6 +292,7 @@ struct PageViewQueries: Sendable {
             var breakdown = PageViewBreakdown.build(colorBy: colorBy, buckets: window.buckets.map(\.start),
                                                     isDailyFallback: range.isHourly, rows: rows,
                                                     bucketTotals: totals, smallCellThreshold: smallCellThreshold)
+            breakdown.dayTimeZone = timeZone
             breakdown.pageSplits = try await dimensionSplits(
                 dimension, breakdown: breakdown, paths: pages.map(\.path),
                 since: window.start, firstDay: firstDay, siteKey: siteKey

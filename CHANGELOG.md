@@ -16,6 +16,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A dark-mode logo: `SignInLogo.image(url:altText:darkURL:)` shows `darkURL`
   when the visitor's system is dark. Every absolute logo URL, per site and
   dark, has its origin added to `img-src`.
+- Page view dimensions: `pageViews.dimensions` breaks each counted view down
+  by 13 coarse values (country, referring host, previous page, four `utm_`
+  tags, device type, browser and version, OS and version, language), derived
+  in memory and stored only as per-day counts in two new tables,
+  `page_view_dimension_counts` and `page_view_pair_counts`. The country comes
+  from a local table built by `Scripts/update-country-database.py`
+  (`CountryLookup`, `countryDatabasePath`); the IP never leaves the process.
+  Apps that register migrations themselves pass `pageViewDimensions: true` to
+  `BotKit.configure(for:database:pageViews:pageViewDimensions:)`.
+- A "Color by" menu on the Page views chart (`?color=`): stacks every bar by
+  page, section or any dimension in a 24-colour palette, lists each value's
+  total for the period in its colour, and splits each most-read page the
+  same way. Values under `dimensions.smallCellThreshold` (default 5), and
+  views without a value, are counted in Other.
 
 ### Changed
 

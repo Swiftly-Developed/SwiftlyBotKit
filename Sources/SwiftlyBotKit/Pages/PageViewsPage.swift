@@ -240,7 +240,11 @@ enum PageViewsPage {
         breakdown: PageViewBreakdown?
     ) -> String {
         let daily = breakdown?.isDailyFallback == true || !range.isHourly
-        var hint = "\(daily ? "Daily" : "Hourly") buckets, \(timeZone.identifier)."
+        let zone = breakdown?.dayTimeZone ?? timeZone
+        var hint = "\(daily ? "Daily" : "Hourly") buckets, \(zone.identifier)."
+        if let dayZone = breakdown?.dayTimeZone, dayZone.identifier != timeZone.identifier {
+            hint += " \(breakdown!.colorBy.label) is counted per \(dayZone.identifier) day, so this chart uses that zone."
+        }
         if let breakdown {
             hint += " Coloured by \(breakdown.colorBy.label.lowercased())."
             if breakdown.isDailyFallback {
@@ -301,7 +305,7 @@ enum PageViewsPage {
             HTMLRaw(BotCharts.columns(
                 stacks,
                 range: axisRange,
-                timeZone: timeZone,
+                timeZone: breakdown.dayTimeZone ?? timeZone,
                 ariaLabel: "Page views per \(axisRange.isHourly ? "hour" : "day"), coloured by \(breakdown.colorBy.label.lowercased())",
                 popoverDescending: true
             ))
