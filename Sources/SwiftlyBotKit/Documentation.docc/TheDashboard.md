@@ -82,7 +82,18 @@ config.dashboard.signInPage = .init(
 )
 ```
 
-``SignInLogo/image(url:altText:)`` takes a root-relative path your app serves, an absolute `https` URL (its origin is added to the page's `img-src`), or a `data:image/` URL; ``SignInLogo/none`` shows no logo. Every ``SignInColors`` field is optional and anything left `nil` keeps the dashboard's colour. The colours apply in light and dark mode alike unless ``BotKitConfiguration/SignInPage/darkColors`` is set. Colours and the logo URL are written into the page, so values that are not plain colours or URLs make `BotKit.configureRoutes(for:config:)` throw ``BotKitConfigurationError/invalidSignInColor(_:_:)`` or ``BotKitConfigurationError/invalidSignInLogo(_:)``.
+``SignInLogo/image(url:altText:darkURL:)`` takes a root-relative path your app serves, an absolute `https` URL (its origin is added to the page's `img-src`), or a `data:image/` URL, and optionally a `darkURL` in the same forms, shown instead when the visitor's system is in dark mode; ``SignInLogo/none`` shows no logo. Every ``SignInColors`` field is optional and anything left `nil` keeps the dashboard's colour. The colours apply in light and dark mode alike unless ``BotKitConfiguration/SignInPage/darkColors`` is set. Colours and the logo URL are written into the page, so values that are not plain colours or URLs make `BotKit.configureRoutes(for:config:)` throw ``BotKitConfigurationError/invalidSignInColor(_:_:)`` or ``BotKitConfigurationError/invalidSignInLogo(_:)``.
+
+The dashboard is mounted on every host, so in a multi-site app each site can have its own logo. ``BotKitConfiguration/SignInPage/siteLogos`` is keyed by what ``BotKitConfiguration/siteKey`` returns for the sign-in request; a site without an entry gets ``BotKitConfiguration/SignInPage/logo``, and the alt text defaults to the site's ``BotDashboardSite/name``:
+
+```swift
+config.dashboard.signInPage.siteLogos = [
+    "shop": .image(url: "/images/shop.png", darkURL: "/images/shop-dark.png"),
+    "docs": .image(url: "/images/docs.svg"),
+]
+```
+
+With ``BotKitConfiguration/sites`` configured, a key that is not one of theirs is almost certainly a typo, so it throws ``BotKitConfigurationError/unknownSignInLogoSite(_:)`` at install.
 
 #### Throttling
 

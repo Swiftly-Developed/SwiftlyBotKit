@@ -37,7 +37,7 @@ struct BotDashboardController: RouteCollection {
         self.password = password
         self.sessionBinding = runtime.signer.credentialBinding(username: username, password: password)
         self.contentSecurityPolicy = Self.contentSecurityPolicy(
-            logoPaths: config.sites.compactMap(\.logoPath) + [config.dashboard.signInPage.logoOrigin].compactMap { $0 }
+            logoPaths: config.sites.compactMap(\.logoPath) + config.dashboard.signInPage.absoluteLogoURLs
         )
     }
 
@@ -62,7 +62,7 @@ struct BotDashboardController: RouteCollection {
 
     private func index(_ req: Request) async throws -> Response {
         guard isSignedIn(req) else {
-            return html(LoginPage.render(error: nil, options: options))
+            return signInPage(req)
         }
         guard let sql = database(req) else { return unavailable(req) }
         let (range, site) = filters(req)
@@ -84,7 +84,7 @@ struct BotDashboardController: RouteCollection {
 
     private func pageViews(_ req: Request) async throws -> Response {
         guard isSignedIn(req) else {
-            return html(LoginPage.render(error: nil, options: options))
+            return signInPage(req)
         }
         guard let sql = database(req) else { return unavailable(req) }
         let (range, site) = filters(req)
@@ -117,7 +117,7 @@ struct BotDashboardController: RouteCollection {
 
     private func exportForm(_ req: Request) async throws -> Response {
         guard isSignedIn(req) else {
-            return html(LoginPage.render(error: nil, options: options))
+            return signInPage(req)
         }
         let (_, site) = filters(req)
         let options = ViewerTimeZone.options(for: req.headers, self.options)
@@ -138,7 +138,7 @@ struct BotDashboardController: RouteCollection {
     /// reports as a failed download.
     private func exportCSV(_ req: Request) async throws -> Response {
         guard isSignedIn(req) else {
-            return html(LoginPage.render(error: nil, options: options))
+            return signInPage(req)
         }
         guard let sql = database(req) else { return unavailable(req) }
         let (_, site) = filters(req)
@@ -253,7 +253,7 @@ struct BotDashboardController: RouteCollection {
         case .allowed(let at):
             reservation = at
         case .blocked:
-            return tooManyAttempts()
+            return tooManyAttempts(req)
         case .globallyBlocked:
             if await limiter.shouldReportGlobalTrip() {
                 req.logger.critical(
@@ -261,7 +261,7 @@ struct BotDashboardController: RouteCollection {
                     metadata: ["client": .string(client)]
                 )
             }
-            return tooManyAttempts()
+            return tooManyAttempts(req)
         }
 
         let submitted = (try? req.content.decode(Credentials.self)) ?? Credentials()
@@ -272,10 +272,7 @@ struct BotDashboardController: RouteCollection {
         guard userMatches && passwordMatches else {
             // The reservation already counts as the failure.
             req.logger.warning("Rejected AI bot dashboard sign-in.", metadata: ["client": .string(client)])
-            return html(
-                LoginPage.render(error: "That username and password did not match.", options: options),
-                status: .unauthorized
-            )
+            return signInPage(req, error: "That username and password did not match.", status: .unauthorized)
         }
 
         await limiter.succeeded(client, reservation: reservation)
@@ -498,12 +495,24 @@ struct BotDashboardController: RouteCollection {
         harden(req.redirect(to: "\(options.basePath)/"))
     }
 
-    private func tooManyAttempts() -> Response {
-        html(
+    /// The sign-in page, with the logo of the site the request is on.
+    private func signInPage(_ req: Request, error: String? = nil, status: HTTPStatus = .ok) -> Response {
+        let key = config.siteKey(req)
+        return html(
             LoginPage.render(
-                error: "Too many attempts. Try again in \(Self.describe(runtime.loginAttempts.window)).",
-                options: options
+                error: error,
+                options: options,
+                siteKey: key,
+                siteName: config.sites.first { $0.key == key }?.name
             ),
+            status: status
+        )
+    }
+
+    private func tooManyAttempts(_ req: Request) -> Response {
+        signInPage(
+            req,
+            error: "Too many attempts. Try again in \(Self.describe(runtime.loginAttempts.window)).",
             status: .tooManyRequests
         )
     }

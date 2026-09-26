@@ -104,4 +104,61 @@ final class SignInPageTests: XCTestCase {
             XCTAssertTrue(res.body.string.contains("<img src=\"https://cdn.example.com/brand/logo.svg\""))
         }
     }
+
+    func testEachSiteGetsItsOwnLogo() {
+        let signIn = BotKitConfiguration.SignInPage(
+            logo: .image(url: "/images/fallback.png"),
+            siteLogos: ["shop": .image(url: "/images/shop.png"), "docs": .none]
+        )
+        var options = BotKitConfiguration.Dashboard.default
+        options.signInPage = signIn
+        let shop = LoginPage.render(error: nil, options: options, siteKey: "shop", siteName: "Shop")
+        XCTAssertTrue(shop.contains("<img src=\"/images/shop.png\" alt=\"Shop\">"), "alt falls back to the site name")
+        let docs = LoginPage.render(error: nil, options: options, siteKey: "docs", siteName: "Docs")
+        XCTAssertFalse(docs.contains("class=\"brand\""))
+        let blog = LoginPage.render(error: nil, options: options, siteKey: "blog", siteName: "Blog")
+        XCTAssertTrue(blog.contains("<img src=\"/images/fallback.png\" alt=\"Blog\">"), "no entry: the shared logo")
+    }
+
+    func testDarkVariant() {
+        let html = page(.init(logo: .image(url: "/images/logo.png", altText: "Acme", darkURL: "/images/logo-dark.png")))
+        XCTAssertTrue(html.contains(
+            "<picture><source srcset=\"/images/logo-dark.png\" media=\"(prefers-color-scheme: dark)\"><img src=\"/images/logo.png\" alt=\"Acme\"></picture>"
+        ), html)
+        XCTAssertThrowsError(try BotKitConfiguration.SignInPage(
+            siteLogos: ["shop": .image(url: "/ok.png", darkURL: "/a\" onerror=\"x")]
+        ).validate())
+    }
+
+    func testSiteLogosAreCheckedAgainstTheSitesAndAllowedByTheCSP() async throws {
+        let app = try await Application.make(.testing)
+        defer { Task { try? await app.asyncShutdown() } }
+        var config = BotKitConfiguration(
+            siteKey: { $0.headers.first(name: .host) == "shop.example" ? "shop" : "docs" },
+            sites: [BotDashboardSite(key: "shop", name: "Shop"), BotDashboardSite(key: "docs", name: "Docs")],
+            signingSecret: "test-secret"
+        )
+        config.recording = .init(recordsAgents: false, recordsReferrals: false)
+        config.verification.isEnabled = false
+        config.dashboard.username = "owner"
+        config.dashboard.password = "correct horse"
+        config.dashboard.signInPage.siteLogos = ["shpo": .image(url: "/shop.png")]
+        XCTAssertThrowsError(try config.validate()) { error in
+            XCTAssertEqual(error as? BotKitConfigurationError, .unknownSignInLogoSite("shpo"))
+        }
+
+        config.dashboard.signInPage.siteLogos = [
+            "shop": .image(url: "/shop.png", darkURL: "https://cdn.example.com/shop-dark.png"),
+            "docs": .image(url: "https://img.example.org/docs.svg"),
+        ]
+        try BotKit.configureRoutes(for: app, config: config)
+        try await app.test(.GET, "/admin/ai-bots/", headers: ["Host": "shop.example"]) { res async in
+            let csp = res.headers.first(name: "Content-Security-Policy") ?? ""
+            XCTAssertTrue(csp.contains("img-src 'self' data: https://img.example.org https://cdn.example.com;"), csp)
+            XCTAssertTrue(res.body.string.contains("<img src=\"/shop.png\" alt=\"Shop\">"))
+        }
+        try await app.test(.GET, "/admin/ai-bots/", headers: ["Host": "docs.example"]) { res async in
+            XCTAssertTrue(res.body.string.contains("<img src=\"https://img.example.org/docs.svg\" alt=\"Docs\">"))
+        }
+    }
 }

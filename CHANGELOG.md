@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A sign-in logo per site: `dashboard.signInPage.siteLogos`, keyed by what
+  `siteKey` returns, replaces `logo` on the site the sign-in page is opened
+  on. The alt text defaults to that site's name. With `sites` configured, a
+  key that is not one of them throws `unknownSignInLogoSite` at install.
+- A dark-mode logo: `SignInLogo.image(url:altText:darkURL:)` shows `darkURL`
+  when the visitor's system is dark. Every absolute logo URL, per site and
+  dark, has its origin added to `img-src`.
+
 ### Changed
 
 - The dashboard, page views and export are drawn in the time zone of the
@@ -18,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   zone actually used.
 - **The `Content-Security-Policy` now has a `script-src`** allowing that one
   script by its SHA-256 hash, and nothing else.
+- **Breaking:** `SignInLogo.image` has a third associated value, `darkURL`.
+  Building one is unchanged; a `switch` that binds `.image(let url, let alt)`
+  needs a third binding, such as `.image(let url, let alt, _)`.
 
 ## [0.6.0] - 2026-09-26
 

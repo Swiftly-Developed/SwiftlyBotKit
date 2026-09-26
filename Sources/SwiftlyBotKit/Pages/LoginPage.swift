@@ -9,7 +9,14 @@ import Elementary
 /// database.
 enum LoginPage {
 
-    static func render(error: String?, options: BotKitConfiguration.Dashboard = .default) -> String {
+    /// `siteKey` picks the logo from ``BotKitConfiguration/SignInPage/siteLogos``;
+    /// `siteName` is its default alt text.
+    static func render(
+        error: String?,
+        options: BotKitConfiguration.Dashboard = .default,
+        siteKey: String? = nil,
+        siteName: String? = nil
+    ) -> String {
         let page = html(.lang("en")) {
             head {
                 meta(.charset(.utf8))
@@ -21,7 +28,7 @@ enum LoginPage {
             }
             body {
                 main(.class("login")) {
-                    logo(options)
+                    logo(options.signInPage.logo(forSite: siteKey), label: siteName ?? options.title)
                     div(.class("card")) {
                         h1 { options.title }
                         p(.class("sub")) { "Sign in to view crawler and assistant activity." }
@@ -50,12 +57,19 @@ enum LoginPage {
     }
 
     @HTMLBuilder
-    private static func logo(_ options: BotKitConfiguration.Dashboard) -> some HTML {
-        switch options.signInPage.logo {
+    private static func logo(_ logo: SignInLogo, label: String) -> some HTML {
+        switch logo {
         case .swiftlyBotKit:
             div(.class("brand")) { HTMLRaw(BotKitLogo.inline(label: "SwiftlyBotKit")) }
-        case .image(let url, let altText):
-            div(.class("brand")) { img(.src(url), .alt(altText ?? options.title)) }
+        case .image(let url, let altText, nil):
+            div(.class("brand")) { img(.src(url), .alt(altText ?? label)) }
+        case .image(let url, let altText, let darkURL?):
+            div(.class("brand")) {
+                picture {
+                    source(.custom(name: "srcset", value: darkURL), .custom(name: "media", value: "(prefers-color-scheme: dark)"))
+                    img(.src(url), .alt(altText ?? label))
+                }
+            }
         case .none:
             EmptyHTML()
         }
@@ -82,7 +96,7 @@ enum LoginPage {
     main.login input{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;
       font:inherit;background:var(--page);color:var(--text-primary)}
     main.login .brand{display:flex;justify-content:center;margin:0 0 18px}
-    main.login .brand svg,main.login .brand img{height:64px;width:auto;max-width:100%;display:block}
+    main.login .brand svg,main.login .brand img,main.login .brand picture{height:64px;width:auto;max-width:100%;display:block}
     main.login .primary{width:100%;margin-top:18px;padding:10px;border-radius:8px;
       border:1px solid var(--signin-button,var(--text-primary));
       background:var(--signin-button,var(--text-primary));color:var(--signin-button-text,var(--surface-1));
