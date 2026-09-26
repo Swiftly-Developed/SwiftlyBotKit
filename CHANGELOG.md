@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-26
+
+### Added
+
+- An "Export" tab at `<path>/export/` that downloads the recorded data as
+  CSV. Choose the period (24 hours, 7, 30 or 90 days, or custom dates as
+  whole local days), the level of detail (raw rows, per day, per ISO week,
+  per month, or totals), what to include (AI agents, AI referrals, people)
+  and the breakdown (site, page, agent and operator, purpose, verification,
+  referring assistant). Every line carries an `audience` column. IP hashes
+  and user agents are never exported, values a spreadsheet would run as a
+  formula are escaped, and raw exports are streamed. No configuration: it is
+  there whenever the dashboard is.
+
+### Changed
+
+- The dashboard's tabs are always shown, since Export exists even with page
+  views off.
+
+## [0.5.0] - 2026-09-26
+
+### Added
+
+- Hover (or tap) popovers on the dashboard's charts. Over-time columns show
+  the bucket's day or hour, each segment with its count and share, and a
+  total; bar rows show the details behind the bar (people and AI agents per
+  page, user-triggered against crawled, verified and spoofed per agent).
+  CSS only, since the dashboard's content security policy allows no script.
+
+## [0.4.0] - 2026-09-26
+
+### Added
+
+- An audience filter on the "Page views" tab: People, AI agents (successful
+  page requests only) or Combined, which stacks both in the chart and in each
+  page's bar. When counting began inside the window, the chart says so and
+  the people average covers only the time since.
+
+## [0.3.0] - 2026-09-26
+
+### Added
+
+- A logo above the dashboard's sign-in form, the SwiftlyBotKit logo by
+  default (embedded, nothing to host), and configurable sign-in colours:
+  `dashboard.signInPage` (`SignInPage`, `SignInLogo`, `SignInColors`), with
+  optional separate dark-mode colours. Unsafe colours or logo URLs throw
+  `invalidSignInColor` / `invalidSignInLogo` at install.
+
+## [0.2.1] - 2026-09-26
+
+### Fixed
+
+- Signing in to the dashboard from a browser failed with 403 ("Cross-site
+  requests to the dashboard are refused"). The dashboard sent
+  `Referrer-Policy: no-referrer`, under which browsers send `Origin: null` on
+  the sign-in form, and the cross-site check refused that. `Sec-Fetch-Site`,
+  when present, now decides on its own (only `same-origin` and `none` pass,
+  so `same-site` is now refused too), and the policy is `same-origin`, which
+  still sends no referrer to other sites.
+
+## [0.2.0] - 2026-09-26
+
 ### Added
 
 - Optional anonymous page views (`BotKitConfiguration.pageViews`, off by
@@ -19,27 +81,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `BotKit.configure(for:database:pageViews:)` registers the page view table
   when `pageViews` is `true`; `install(on:config:)` does so from the
   configuration.
-- An audience filter on the "Page views" tab: People, AI agents (successful
-  page requests only) or Combined, which stacks both in the chart and in each
-  page's bar. When counting began inside the window, the chart says so and
-  the people average covers only the time since.
-- A logo above the dashboard's sign-in form, the SwiftlyBotKit logo by
-  default (embedded, nothing to host), and configurable sign-in colours:
-  `dashboard.signInPage` (`SignInPage`, `SignInLogo`, `SignInColors`), with
-  optional separate dark-mode colours. Unsafe colours or logo URLs throw
-  `invalidSignInColor` / `invalidSignInLogo` at install.
 - `BotKitConfigurationError.pageViewsNotMigrated`, thrown when page views are
   enabled but their table was not registered.
 
-### Fixed
+## [0.1.2] - 2026-09-25
 
-- Signing in to the dashboard from a browser failed with 403 ("Cross-site
-  requests to the dashboard are refused"). The dashboard sent
-  `Referrer-Policy: no-referrer`, under which browsers send `Origin: null` on
-  the sign-in form, and the cross-site check refused that. `Sec-Fetch-Site`,
-  when present, now decides on its own (only `same-origin` and `none` pass,
-  so `same-site` is now refused too), and the policy is `same-origin`, which
-  still sends no referrer to other sites.
+### Fixed
 
 - The tutorials page is now published at `tutorials/meetswiftlybotkit`, the
   address the README links to. DocC names the page after its file, which was
@@ -226,6 +273,13 @@ Initial public release.
   agents.
 - `Scripts/generate-ai-agent-catalog.py` to regenerate the catalog.
 
-[Unreleased]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.1.1...HEAD
+[Unreleased]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.6.0...HEAD
+[0.6.0]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.5.0...0.6.0
+[0.5.0]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.4.0...0.5.0
+[0.4.0]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.3.0...0.4.0
+[0.3.0]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.2.1...0.3.0
+[0.2.1]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.2.0...0.2.1
+[0.2.0]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.1.2...0.2.0
+[0.1.2]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.1.1...0.1.2
 [0.1.1]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.1.0...0.1.1
 [0.1.0]: https://github.com/Swiftly-Developed/SwiftlyBotKit/releases/tag/0.1.0

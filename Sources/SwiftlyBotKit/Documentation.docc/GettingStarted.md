@@ -20,7 +20,7 @@ In `Package.swift`, add the package and its product:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Swiftly-Developed/SwiftlyBotKit.git", from: "0.1.0"),
+    .package(url: "https://github.com/Swiftly-Developed/SwiftlyBotKit.git", from: "0.6.0"),
 ],
 targets: [
     .executableTarget(
