@@ -64,6 +64,11 @@ enum BotCharts {
 
     /// The column chart both of the above draw: segments stacked bottom-up in
     /// the order given. Adjacent segments should use adjacent palette slots.
+    ///
+    /// Returns a `.plot` wrapper: the SVG, then an HTML layer of one hover
+    /// target per bucket, placed in percentages of the same viewBox so it lines
+    /// up at any width. Hovering (or tapping) a column opens its popover.
+    /// CSS only: the dashboard's CSP allows no script.
     static func columns(
         _ stacks: [(bucket: Date, segments: [ColumnSegment])],
         range: BotDateRange,
@@ -82,6 +87,7 @@ enum BotCharts {
         // Capped at 24px; the band's leftover is deliberately left as air.
         let barWidth = min(24.0, max(3.0, band - 6.0))
 
+        var hits = "<div class=\"hits\" aria-hidden=\"true\">"
         var svg = "<svg viewBox=\"0 0 \(fmt(width)) \(fmt(height))\" role=\"img\" aria-label=\"\(escape(ariaLabel))\">"
 
         // Gridlines and y ticks: hairline, solid, recessive.
@@ -116,6 +122,22 @@ enum BotCharts {
                 cursor = y
             }
 
+            // Hover target: the whole band, full plot height, so a zero or a
+            // 2px column is as easy to find as a tall one. The popover opens
+            // towards the middle of the chart so it never runs off an edge.
+            let bandLeft = left + band * Double(index)
+            let opensLeft = bandLeft + band / 2 > width / 2
+            hits += "<div class=\"col\(opensLeft ? " flip" : "")\" tabindex=\"-1\" style=\"left:\(fmt(bandLeft / width * 100))%;"
+            hits += "width:\(fmt(band / width * 100))%;top:\(fmt(top / height * 100))%;height:\(fmt(plotHeight / height * 100))%\">"
+            hits += popover(
+                title: range.popoverLabel(for: stack.bucket, in: timeZone),
+                subtitle: nil,
+                lines: segments.reversed().map { .init(label: $0.label, color: $0.color, count: $0.count) },
+                total: segments.count > 1 ? segments.reduce(0) { $0 + $1.count } : nil,
+                empty: "Nothing recorded"
+            )
+            hits += "</div>"
+
             // Counted back from the newest bucket, so the latest one is always
             // labelled and no label is ever squeezed in beside another.
             if (stacks.count - 1 - index) % labelStep == 0 {
@@ -125,7 +147,63 @@ enum BotCharts {
         }
 
         svg += "</svg>"
-        return svg
+        return "<div class=\"plot\">" + svg + hits + "</div></div>"
+    }
+
+    // MARK: - Popovers
+
+    /// One line of a popover: a swatch, a label and a count.
+    struct PopoverLine {
+        let label: String
+        /// Swatch colour; `nil` draws no swatch.
+        let color: String?
+        let count: Int
+        /// Share shown after the count, computed against this. `nil` shows none.
+        let shareOf: Int?
+
+        init(label: String, color: String?, count: Int, shareOf: Int? = nil) {
+            self.label = label
+            self.color = color
+            self.count = count
+            self.shareOf = shareOf
+        }
+    }
+
+    /// The popover card both chart kinds open. Lines are listed as given; a
+    /// stacked column passes them top-down so they read in the order drawn.
+    /// With `total`, every line also shows its share of it.
+    static func popover(
+        title: String,
+        subtitle: String?,
+        lines: [PopoverLine],
+        total: Int?,
+        empty: String? = nil,
+        footer: String? = nil
+    ) -> String {
+        var html = "<div class=\"tip\"><div class=\"tip-title\">\(escape(title))</div>"
+        if let subtitle { html += "<div class=\"tip-sub\">\(escape(subtitle))</div>" }
+        if lines.isEmpty, let empty { html += "<div class=\"tip-sub\">\(escape(empty))</div>" }
+        for line in lines {
+            html += "<div class=\"tip-line\">"
+            html += line.color.map { "<i style=\"background:\($0)\"></i>" } ?? "<i class=\"none\"></i>"
+            html += "<span>\(escape(line.label))</span><b>\(grouped(line.count))"
+            if let whole = line.shareOf ?? total, whole > 0 {
+                html += "<em>\(share(line.count, of: whole))</em>"
+            }
+            html += "</b></div>"
+        }
+        if let total { html += "<div class=\"tip-line tip-total\"><i class=\"none\"></i><span>Total</span><b>\(grouped(total))</b></div>" }
+        if let footer { html += "<div class=\"tip-sub tip-foot\">\(escape(footer))</div>" }
+        return html + "</div>"
+    }
+
+    /// "37%", with "<1%" rather than a misleading "0%" for a non-zero part.
+    static func share(_ part: Int, of whole: Int) -> String {
+        guard whole > 0 else { return "" }
+        let percent = Double(part) / Double(whole) * 100
+        if part > 0, percent < 0.5 { return "<1%" }
+        if part < whole, percent >= 99.5 { return "99%" }
+        return "\(Int(percent.rounded()))%"
     }
 
     /// Square at the baseline, 4px rounded at the data end: the fixed bar spec.
@@ -154,6 +232,11 @@ enum BotCharts {
         /// beside it. Used for the user-triggered share of a page's traffic.
         let highlight: Int?
         let highlightColor: String?
+        /// Lines of the row's hover popover under the name. Empty shows the
+        /// value alone.
+        let details: [PopoverLine]
+        /// Grey line at the foot of the popover.
+        let detailNote: String?
 
         init(
             name: String,
@@ -163,7 +246,9 @@ enum BotCharts {
             color: String,
             flag: String?,
             highlight: Int? = nil,
-            highlightColor: String? = nil
+            highlightColor: String? = nil,
+            details: [PopoverLine] = [],
+            detailNote: String? = nil
         ) {
             self.name = name
             self.meta = meta
@@ -173,6 +258,8 @@ enum BotCharts {
             self.flag = flag
             self.highlight = highlight
             self.highlightColor = highlightColor
+            self.details = details
+            self.detailNote = detailNote
         }
     }
 
@@ -184,7 +271,7 @@ enum BotCharts {
         var html = "<div class=\"rows\">"
         for row in rows {
             let share = max(1.5, Double(row.value) / Double(peak) * 100)
-            html += "<div class=\"row\"><div class=\"head\"><div class=\"name\">\(escape(row.name))"
+            html += "<div class=\"row\" tabindex=\"-1\" style=\"--at:\(fmt(share))%\"><div class=\"head\"><div class=\"name\">\(escape(row.name))"
             if let meta = row.meta { html += "<span class=\"meta\"> \(escape(meta))</span>" }
             if let flag = row.flag { html += "<span class=\"tag bad\">\(escape(flag))</span>" }
             html += "</div><div class=\"num\">\(grouped(row.value))"
@@ -199,7 +286,19 @@ enum BotCharts {
                 html += "<div class=\"seg\(isWhole ? " whole" : "")\" style=\"width:\(fmt(portion))%;background:\(color)\"></div>"
             }
             html += "</div></div>"
-            html += "</div>"
+            // Opens under the end of the bar, clamped inside the row by CSS.
+            let lines = row.details.isEmpty
+                ? [PopoverLine(label: "Total", color: row.color, count: row.value)]
+                : row.details
+            html += "<div class=\"pop\" aria-hidden=\"true\">"
+            html += popover(
+                title: row.name,
+                subtitle: [row.meta, row.flag].compactMap { $0 }.joined(separator: " \u{00B7} ").nilIfEmpty,
+                lines: lines,
+                total: nil,
+                footer: row.detailNote
+            )
+            html += "</div></div>"
         }
         return html + "</div>"
     }
@@ -264,4 +363,8 @@ enum BotCharts {
             .replacingOccurrences(of: "\"", with: "&quot;")
             .replacingOccurrences(of: "'", with: "&#39;")
     }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }

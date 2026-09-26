@@ -105,6 +105,21 @@ public enum BotDateRange: String, CaseIterable, Sendable {
         return formatter.string(from: Date(timeIntervalSince1970: local))
     }
 
+    /// Heading for a column's hover popover: "Sat 3 Mar, 14:00 to 15:00" or
+    /// "Sat 3 Mar". Like ``axisLabel(for:in:)`` it names the wall-clock bucket,
+    /// but spells out the day so an hourly bar is not just a time.
+    func popoverLabel(for date: Date, in timeZone: TimeZone) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        let local = Date(timeIntervalSince1970: Double(bucketKey(for: date, in: timeZone) * unitSeconds))
+        formatter.dateFormat = "EEE d MMM"
+        let day = formatter.string(from: local)
+        guard isHourly else { return day }
+        formatter.dateFormat = "HH:mm"
+        return "\(day), \(formatter.string(from: local)) to \(formatter.string(from: local.addingTimeInterval(3_600)))"
+    }
+
     // MARK: - Wall-clock keys
 
     /// The bucket an instant belongs to: its local wall-clock time, in whole

@@ -359,11 +359,27 @@ enum DashboardPage {
                         value: agent.count,
                         note: agent.verified > 0 ? "\(BotCharts.grouped(agent.verified)) verified" : nil,
                         color: agent.purpose.map(DashboardTheme.seriesColor(for:)) ?? "var(--baseline)",
-                        flag: agent.respectsRobotsTxt == false ? "ignores robots.txt" : nil
+                        flag: agent.respectsRobotsTxt == false ? "ignores robots.txt" : nil,
+                        details: agentDetails(agent),
+                        detailNote: agent.purpose?.label ?? "Purpose unknown"
                     )
                 }))
             }
         }
+    }
+
+    /// An agent's popover: its visits, then how many of them we could check
+    /// against the operator's published ranges.
+    static func agentDetails(_ agent: BotDashboardData.AgentRow) -> [BotCharts.PopoverLine] {
+        let color = agent.purpose.map(DashboardTheme.seriesColor(for:)) ?? "var(--baseline)"
+        var lines: [BotCharts.PopoverLine] = [
+            .init(label: "Visits", color: color, count: agent.count),
+            .init(label: "Verified", color: nil, count: agent.verified, shareOf: agent.count),
+        ]
+        if agent.spoofed > 0 {
+            lines.append(.init(label: "Spoofed", color: "var(--critical)", count: agent.spoofed, shareOf: agent.count))
+        }
+        return lines
     }
 
     private static func pagesCard(_ pages: [BotDashboardData.PageRow]) -> some HTML {
@@ -382,7 +398,14 @@ enum DashboardPage {
                         color: "var(--series-1-soft)",
                         flag: nil,
                         highlight: page.userTriggered,
-                        highlightColor: "var(--series-1)"
+                        highlightColor: "var(--series-1)",
+                        details: [
+                            .init(label: "User-triggered", color: "var(--series-1)",
+                                  count: page.userTriggered, shareOf: page.count),
+                            .init(label: "Crawled without a person asking", color: "var(--series-1-soft)",
+                                  count: page.count - page.userTriggered, shareOf: page.count),
+                        ],
+                        detailNote: "\(BotCharts.grouped(page.count)) agent requests"
                     )
                 }))
                 // Two shades means two marks, so the legend is not optional.
@@ -411,7 +434,8 @@ enum DashboardPage {
             } else {
                 HTMLRaw(BotCharts.barRows(referrals.map { row in
                     .init(name: row.platform, meta: nil, value: row.count, note: nil,
-                          color: "var(--series-3)", flag: nil)
+                          color: "var(--series-3)", flag: nil,
+                          details: [.init(label: "Visitors", color: "var(--series-3)", count: row.count)])
                 }))
             }
         }

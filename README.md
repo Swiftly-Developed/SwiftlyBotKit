@@ -56,7 +56,8 @@ breakdown is what this package records and shows.
   site switcher.
 - Server-rendered dashboard with no JavaScript and no CDN: summary tiles, a
   stacked time series, top agents, top pages and AI referrals, filtered by
-  24 hours, 7, 30 or 90 days.
+  24 hours, 7, 30 or 90 days. Hovering a column or bar opens a popover with
+  its breakdown (CSS only).
 - CSV export from the dashboard: any date range, per day, ISO week or month,
   totals, or raw rows, for AI agents, AI referrals, people or all of them,
   broken down by site, page, agent, purpose, verification or assistant.

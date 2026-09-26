@@ -168,14 +168,47 @@ final class BotChartsTests: XCTestCase {
             )
         }
         let svg = BotCharts.stackedColumns(series: series, range: .week, timeZone: .current)
-        XCTAssertTrue(svg.hasPrefix("<svg"))
-        XCTAssertTrue(svg.hasSuffix("</svg>"))
+        XCTAssertTrue(svg.hasPrefix("<div class=\"plot\"><svg"))
+        XCTAssertTrue(svg.contains("</svg>"))
         // Six populated buckets, two segments each: the top one is a rounded
         // path, the lower one a plain rect.
         XCTAssertEqual(svg.components(separatedBy: "<path").count - 1, 6)
         XCTAssertEqual(svg.components(separatedBy: "<rect").count - 1, 6)
-        // Hover layer.
+        // Hover layer: native titles for assistive tech, and one popover
+        // target per bucket, empty ones included.
         XCTAssertTrue(svg.contains("<title>"))
+        XCTAssertEqual(svg.components(separatedBy: "class=\"col").count - 1, 7)
+        XCTAssertEqual(svg.components(separatedBy: "class=\"tip\"").count - 1, 7)
+        XCTAssertTrue(svg.contains("Nothing recorded"))
+        // Two segments: the popover lists both with their share, then a total.
+        XCTAssertTrue(svg.contains("Model training"))
+        XCTAssertTrue(svg.contains("67%"))
+        XCTAssertTrue(svg.contains("Total"))
+        // The later columns open leftwards so the popover stays on the chart.
+        XCTAssertTrue(svg.contains("class=\"col flip\""))
+    }
+
+    func testPopoverLabelSpellsOutTheBucket() {
+        let utc = TimeZone(secondsFromGMT: 0)!
+        let date = Date(timeIntervalSince1970: 1_790_000_000) // Mon 21 Sep 2026 14:13 UTC
+        XCTAssertEqual(BotDateRange.day.popoverLabel(for: date, in: utc), "Mon 21 Sep, 14:00 to 15:00")
+        XCTAssertEqual(BotDateRange.week.popoverLabel(for: date, in: utc), "Mon 21 Sep")
+    }
+
+    func testBarRowPopoverShowsDetailsAndEscapes() {
+        let html = BotCharts.barRows([
+            .init(name: "/<b>/", meta: nil, value: 40, note: nil, color: "var(--series-2)", flag: nil,
+                  details: [
+                      .init(label: "People", color: "var(--series-1)", count: 10, shareOf: 40),
+                      .init(label: "AI agents", color: "var(--series-2)", count: 30, shareOf: 40),
+                  ],
+                  detailNote: "40 reads in total"),
+        ])
+        XCTAssertTrue(html.contains("class=\"tip\""))
+        XCTAssertTrue(html.contains("25%"))
+        XCTAssertTrue(html.contains("75%"))
+        XCTAssertTrue(html.contains("40 reads in total"))
+        XCTAssertFalse(html.contains("<b>/"))
     }
 
     func testEmptySeriesStillRendersAxes() {

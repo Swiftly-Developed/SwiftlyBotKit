@@ -243,21 +243,30 @@ enum PageViewsPage {
     }
 
     static func row(for page: PageViewData.PageRow, audience: PageViewAudience) -> BotCharts.BarRow {
+        // The popover always shows both audiences, with their share of the
+        // page's reads, whichever one the bar is drawn for.
+        let total = page.people + page.agents
+        let details: [BotCharts.PopoverLine] = [
+            .init(label: "People", color: peopleColor, count: page.people, shareOf: total),
+            .init(label: "AI agents", color: agentsColor, count: page.agents, shareOf: total),
+        ]
+        let detailNote = "\(BotCharts.grouped(total)) reads in total"
         switch audience {
         case .people:
             return .init(name: page.path, meta: nil, value: page.people,
                          note: page.agents > 0 ? "\(BotCharts.grouped(page.agents)) AI agent" : nil,
-                         color: peopleColor, flag: nil)
+                         color: peopleColor, flag: nil, details: details, detailNote: detailNote)
         case .agents:
             return .init(name: page.path, meta: nil, value: page.agents,
                          note: page.people > 0 ? "\(BotCharts.grouped(page.people)) people" : nil,
-                         color: agentsColor, flag: nil)
+                         color: agentsColor, flag: nil, details: details, detailNote: detailNote)
         case .combined:
             // People are drawn at the baseline, inside the bar, in their own colour.
             return .init(name: page.path, meta: nil, value: page.people + page.agents,
                          note: "\(BotCharts.grouped(page.people)) people \u{00B7} \(BotCharts.grouped(page.agents)) AI",
                          color: agentsColor, flag: nil,
-                         highlight: page.people, highlightColor: peopleColor)
+                         highlight: page.people, highlightColor: peopleColor,
+                         details: details, detailNote: detailNote)
         }
     }
 
