@@ -127,7 +127,29 @@ enum DashboardTheme {
     /* Below ~560px the chart would shrink its labels past legibility, so it
        keeps a minimum width and scrolls sideways inside its card instead. */
     .chart{overflow-x:auto;-webkit-overflow-scrolling:touch}
-    .chart svg{min-width:560px}
+    .plot{position:relative;min-width:560px}
     .axis{fill:var(--muted);font-size:11px}
+
+    /* Hover popovers. CSS only: the CSP allows no script. A column's target
+       is its whole band; tapping works too, via tabindex="-1" and :focus. */
+    .hits{position:absolute;inset:0}
+    .col{position:absolute;border-radius:4px;outline:none;cursor:default}
+    .col:hover,.col:focus{background:color-mix(in srgb,var(--text-primary) 6%,transparent)}
+    .col .tip{top:0;left:calc(100% + 6px)}
+    .col.flip .tip{left:auto;right:calc(100% + 6px)}
+    .tip{display:none;position:absolute;z-index:5;width:max-content;min-width:170px;max-width:260px;
+      padding:9px 11px;border-radius:9px;background:var(--surface-1);border:1px solid var(--border);
+      box-shadow:0 8px 24px rgba(0,0,0,.22);font-size:12.5px;line-height:1.4;pointer-events:none;text-align:left}
+    .col:hover .tip,.col:focus .tip{display:block}
+    .tip-title{font-weight:650;color:var(--text-primary);overflow-wrap:anywhere}
+    .tip-sub{color:var(--muted);font-size:12px}
+    .tip-foot{margin-top:5px}
+    .tip-line{display:flex;align-items:center;gap:7px;margin-top:4px;color:var(--text-secondary)}
+    .tip-line i{width:9px;height:9px;border-radius:3px;flex:none}
+    .tip-line i.none{background:none}
+    .tip-line span{flex:1}
+    .tip-line b{color:var(--text-primary);font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+    .tip-line em{font-style:normal;font-weight:400;color:var(--muted);margin-left:6px}
+    .tip-total{border-top:1px solid var(--border);padding-top:4px;margin-top:6px}
     """
 }

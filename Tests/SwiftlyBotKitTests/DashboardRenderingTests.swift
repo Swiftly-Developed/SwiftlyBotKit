@@ -168,20 +168,31 @@ final class BotChartsTests: XCTestCase {
             )
         }
         let svg = BotCharts.stackedColumns(series: series, range: .week, timeZone: .current)
-        XCTAssertTrue(svg.hasPrefix("<svg"))
-        XCTAssertTrue(svg.hasSuffix("</svg>"))
+        XCTAssertTrue(svg.hasPrefix("<div class=\"plot\"><svg"))
+        XCTAssertTrue(svg.contains("</svg>"))
         // Six populated buckets, two segments each: the top one is a rounded
         // path, the lower one a plain rect.
         XCTAssertEqual(svg.components(separatedBy: "<path").count - 1, 6)
         XCTAssertEqual(svg.components(separatedBy: "<rect").count - 1, 6)
-        // Hover layer.
+        // Hover layer: native titles for assistive tech, and one popover
+        // target per bucket, empty ones included.
         XCTAssertTrue(svg.contains("<title>"))
+        XCTAssertEqual(svg.components(separatedBy: "class=\"col").count - 1, 7)
+        XCTAssertEqual(svg.components(separatedBy: "class=\"tip\"").count - 1, 7)
+        XCTAssertTrue(svg.contains("Nothing recorded"))
+        // Two segments: the popover lists both with their share, then a total.
+        XCTAssertTrue(svg.contains("Model training"))
+        XCTAssertTrue(svg.contains("67%"))
+        XCTAssertTrue(svg.contains("Total"))
+        // The later columns open leftwards so the popover stays on the chart.
+        XCTAssertTrue(svg.contains("class=\"col flip\""))
     }
 
-    func testEmptySeriesStillRendersAxes() {
-        let svg = BotCharts.stackedColumns(series: [], range: .week, timeZone: .current)
-        XCTAssertTrue(svg.contains("<svg"))
-        XCTAssertFalse(svg.contains("<rect"))
+    func testPopoverLabelSpellsOutTheBucket() {
+        let utc = TimeZone(secondsFromGMT: 0)!
+        let date = Date(timeIntervalSince1970: 1_790_000_000) // Mon 21 Sep 2026 14:13 UTC
+        XCTAssertEqual(BotDateRange.day.popoverLabel(for: date, in: utc), "Mon 21 Sep, 14:00 to 15:00")
+        XCTAssertEqual(BotDateRange.week.popoverLabel(for: date, in: utc), "Mon 21 Sep")
     }
 
     /// The user-triggered share is drawn inside the bar, in a second shade of
