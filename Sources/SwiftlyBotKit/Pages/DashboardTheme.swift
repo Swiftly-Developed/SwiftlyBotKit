@@ -129,5 +129,30 @@ enum DashboardTheme {
     .chart{overflow-x:auto;-webkit-overflow-scrolling:touch}
     .chart svg{min-width:560px}
     .axis{fill:var(--muted);font-size:11px}
+
+    /* Export form. No script: the custom dates are dimmed, not hidden, when
+       another period is picked, so a browser without :has() still shows them. */
+    .export .fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(240px,100%),1fr));gap:16px}
+    .export fieldset{border:1px solid var(--border);border-radius:10px;padding:10px 12px 12px;margin:0;min-width:0}
+    .export legend{font-size:12px;font-weight:650;color:var(--text-secondary);padding:0 4px}
+    .choice{display:flex;gap:9px;align-items:flex-start;padding:5px 2px;font-size:13.5px;cursor:pointer}
+    .choice input{margin:3px 0 0;accent-color:var(--series-1);flex:none}
+    .choice b{font-weight:600}
+    .choice small{display:block;color:var(--muted);font-size:12px;line-height:1.35}
+    .dates{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 4px 24px}
+    .dates label{display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--text-secondary)}
+    .dates input{font:inherit;font-size:13px;padding:5px 8px;border-radius:7px;border:1px solid var(--border);
+      background:var(--page);color:var(--text-primary)}
+    .export:has(#range-custom:not(:checked)) .dates{opacity:.45}
+    .export fieldset .hint{margin:6px 0 0}
+    .actions{margin-top:16px;display:flex;justify-content:flex-end}
+    .btn.primary{background:var(--text-primary);color:var(--surface-1);border-color:var(--text-primary);padding:9px 16px}
+    .btn:focus-visible,.choice input:focus-visible,.dates input:focus-visible{outline:2px solid var(--series-1);outline-offset:2px}
+    .notice{border:1px solid var(--critical);color:var(--critical);background:var(--surface-1);border-radius:10px;
+      padding:10px 14px;font-size:13.5px;font-weight:600;margin-bottom:16px}
+    .columns{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;margin:0;font-size:13px}
+    .columns dt{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;font-weight:600}
+    .columns dd{margin:0;color:var(--text-secondary)}
+    @media (max-width:560px){.columns{grid-template-columns:1fr}.columns dd{margin-bottom:6px}}
     """
 }

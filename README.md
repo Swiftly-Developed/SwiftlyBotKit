@@ -57,6 +57,9 @@ breakdown is what this package records and shows.
 - Server-rendered dashboard with no JavaScript and no CDN: summary tiles, a
   stacked time series, top agents, top pages and AI referrals, filtered by
   24 hours, 7, 30 or 90 days.
+- CSV export from the dashboard: any date range, per day, ISO week or month,
+  totals, or raw rows, for AI agents, AI referrals, people or all of them,
+  broken down by site, page, agent, purpose, verification or assistant.
 - Custom agents and referrer hosts can be added, and built-in ones
   reclassified, through configuration.
 
@@ -256,6 +259,29 @@ dashboard are skipped.
 | `isEnabled` | `false` | Count page views and show the tab. |
 | `flushInterval` | 10 seconds | How often the in-memory counts are written, in one statement. A killed process loses at most this much. |
 | `maximumPendingCounters` | `10_000` | Distinct site, path and quarter-hour counters held between writes. Beyond it new ones are dropped with a sampled warning. |
+
+## Exporting to CSV
+
+The dashboard's **Export** tab, at `/admin/ai-bots/export/`, downloads a CSV.
+No configuration: it is there whenever the dashboard is. You choose:
+
+- **Period**: 24 hours, 7, 30 or 90 days, or custom dates (whole local days,
+  both included).
+- **Level of detail**: raw rows, per day, per ISO week, per month, or totals.
+- **Include**: AI agents, AI referrals and people (with page views on), in any
+  combination. Optionally AI agents' page reads only, to compare like for like
+  with people.
+- **Break down by**: site, page, agent and operator, purpose, verification,
+  referring assistant.
+
+Every line carries an `audience` column (`ai_agent`, `ai_referral`, `people`),
+so a combined file pivots cleanly. Grouped exports have `period`,
+`period_start` and `period_end` (local time with its offset), the chosen
+breakdown columns and `count`. Raw AI lines are one request each; raw people
+lines are the quarter-hour counters, the finest that is stored. IP hashes and
+user agents are never exported, and values a spreadsheet would run as a
+formula are escaped. Raw exports are streamed, so memory stays flat however
+long the period.
 
 ## Configuration
 

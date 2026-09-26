@@ -7,12 +7,15 @@ enum DashboardSection: Sendable, CaseIterable {
     case agents
     /// Anonymous page view counts, at `<path>/pages/`.
     case pageViews
+    /// The CSV export form, at `<path>/export/`.
+    case export
 
     /// Appended to the dashboard's base path.
     var pathSuffix: String {
         switch self {
         case .agents: return "/"
         case .pageViews: return "/pages/"
+        case .export: return "/export/"
         }
     }
 
@@ -20,7 +23,14 @@ enum DashboardSection: Sendable, CaseIterable {
         switch self {
         case .agents: return "AI agents"
         case .pageViews: return "Page views"
+        case .export: return "Export"
         }
+    }
+
+    /// The tabs an app shows: the page views tab only when page views are
+    /// counted.
+    static func available(pageViews: Bool) -> [DashboardSection] {
+        allCases.filter { $0 != .pageViews || pageViews }
     }
 }
 
@@ -57,7 +67,7 @@ enum DashboardPage {
                 main {
                     header(title: options.title, base: base, range: range, siteName: siteName,
                            generatedAt: generatedAt, timeZone: options.timeZone.foundationTimeZone)
-                    filters(base: base, section: .agents, showsTabs: showsPageViews, range: range,
+                    filters(base: base, section: .agents, sections: DashboardSection.available(pageViews: showsPageViews), range: range,
                             ranges: options.offeredDateRanges, sites: sites, selectedSite: selectedSite)
                     if data.isEmpty {
                         emptyState(range: range)
@@ -82,7 +92,7 @@ enum DashboardPage {
     static func header(
         title: String,
         base: String,
-        range: BotDateRange,
+        range: BotDateRange?,
         siteName: String?,
         generatedAt: Date,
         timeZone: TimeZone
@@ -91,7 +101,7 @@ enum DashboardPage {
             div {
                 h1 { title }
                 p(.class("sub")) {
-                    [siteName, range.label, "generated \(timestamp(generatedAt, timeZone: timeZone))"]
+                    [siteName, range?.label, "generated \(timestamp(generatedAt, timeZone: timeZone))"]
                         .compactMap { $0 }
                         .joined(separator: " \u{00B7} ")
                 }
@@ -105,7 +115,7 @@ enum DashboardPage {
     static func filters(
         base: String,
         section: DashboardSection,
-        showsTabs: Bool,
+        sections: [DashboardSection],
         range: BotDateRange,
         ranges: [BotDateRange],
         sites: [BotDashboardSite],
@@ -113,8 +123,8 @@ enum DashboardPage {
         audience: PageViewAudience? = nil
     ) -> some HTML {
         div(.class("filters")) {
-            if showsTabs {
-                tabs(base: base, section: section, range: range, selectedSite: selectedSite)
+            if sections.count > 1 {
+                tabs(base: base, section: section, sections: sections, range: range, selectedSite: selectedSite)
             }
             // A switcher with only "All sites" in it would be noise: a
             // single-site app gets the range pills alone.
@@ -135,13 +145,16 @@ enum DashboardPage {
                     }
                 }
             }
-            div(.class("pills")) {
-                for option in ranges {
-                    a(
-                        .href(dashboardURL(base: base, section: section, siteKey: selectedSite?.key ?? "all",
-                                           range: option, audience: audience)),
-                        .class(option == range ? "pill on" : "pill")
-                    ) { option.shortLabel }
+            // The export form has its own period choice, so it passes none.
+            if !ranges.isEmpty {
+                div(.class("pills")) {
+                    for option in ranges {
+                        a(
+                            .href(dashboardURL(base: base, section: section, siteKey: selectedSite?.key ?? "all",
+                                               range: option, audience: audience)),
+                            .class(option == range ? "pill on" : "pill")
+                        ) { option.shortLabel }
+                    }
                 }
             }
         }
@@ -151,11 +164,12 @@ enum DashboardPage {
     private static func tabs(
         base: String,
         section: DashboardSection,
+        sections: [DashboardSection],
         range: BotDateRange,
         selectedSite: BotDashboardSite?
     ) -> some HTML {
         nav(.class("pills tabs"), .custom(name: "aria-label", value: "Dashboard sections")) {
-            for option in DashboardSection.allCases {
+            for option in sections {
                 let href = dashboardURL(base: base, section: option, siteKey: selectedSite?.key ?? "all", range: range)
                 if option == section {
                     a(.href(href), .class("pill on"), .custom(name: "aria-current", value: "page")) { option.label }

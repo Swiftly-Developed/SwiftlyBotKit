@@ -8,6 +8,8 @@ import SQLKit
 /// - `GET  /admin/ai-bots/`: the dashboard, or the sign-in page
 /// - `GET  /admin/ai-bots/pages/`: the page views tab, only when
 ///   ``BotKitConfiguration/PageViews`` is on
+/// - `GET  /admin/ai-bots/export/`: the export form
+/// - `GET  /admin/ai-bots/export/csv`: the CSV it downloads
 /// - `POST /admin/ai-bots/login`
 /// - `POST /admin/ai-bots/logout`
 ///
@@ -50,6 +52,8 @@ struct BotDashboardController: RouteCollection {
         if config.pageViews.isEnabled {
             dashboard.get("pages") { try await self.pageViews($0) }
         }
+        dashboard.get("export") { try await self.exportForm($0) }
+        dashboard.get("export", "csv") { try await self.exportCSV($0) }
         dashboard.post("login") { try await self.login($0) }
         dashboard.post("logout") { try await self.logout($0) }
     }
@@ -96,6 +100,100 @@ struct BotDashboardController: RouteCollection {
             options: options,
             audience: audience
         ))
+    }
+
+    // MARK: - Export
+
+    private func exportOptions(_ req: Request) -> BotExportOptions {
+        BotExportOptions(
+            query: { req.query[String.self, at: $0] },
+            offeredRanges: options.offeredDateRanges,
+            defaultRange: options.dateRange(forQuery: nil),
+            peopleAvailable: config.pageViews.isEnabled
+        )
+    }
+
+    private func exportForm(_ req: Request) async throws -> Response {
+        guard isSignedIn(req) else {
+            return html(LoginPage.render(error: nil, options: options))
+        }
+        let (_, site) = filters(req)
+        return html(ExportPage.render(
+            options: exportOptions(req),
+            sites: config.sites,
+            selectedSite: site,
+            generatedAt: Date(),
+            options: options,
+            showsPageViews: config.pageViews.isEnabled
+        ))
+    }
+
+    /// The CSV. A grouped export is built in full before the response
+    /// starts, so a failed query is an error page rather than a truncated
+    /// file. A raw export has no such bound and is streamed page by page;
+    /// a failure part way ends the transfer with an error, which a browser
+    /// reports as a failed download.
+    private func exportCSV(_ req: Request) async throws -> Response {
+        guard isSignedIn(req) else {
+            return html(LoginPage.render(error: nil, options: options))
+        }
+        guard let sql = database(req) else { return unavailable(req) }
+        let (_, site) = filters(req)
+        let submitted = exportOptions(req)
+        let plan: BotExportPlan
+        do {
+            plan = try submitted.plan(
+                now: Date(),
+                timeZone: options.timeZone.foundationTimeZone,
+                siteKey: site?.key,
+                peopleAvailable: config.pageViews.isEnabled
+            )
+        } catch let error as BotExportError {
+            return html(ExportPage.render(
+                options: submitted,
+                sites: config.sites,
+                selectedSite: site,
+                generatedAt: Date(),
+                options: options,
+                showsPageViews: config.pageViews.isEnabled,
+                error: error
+            ), status: .badRequest)
+        }
+
+        let queries = BotExportQueries(database: sql)
+        let response = Response(status: .ok)
+        response.headers.replaceOrAdd(name: .contentType, value: "text/csv; charset=utf-8")
+        response.headers.replaceOrAdd(name: .contentDisposition, value: "attachment; filename=\"\(plan.fileName)\"")
+        if plan.detail == .raw {
+            let logger = req.logger
+            response.body = .init(managedAsyncStream: { writer in
+                do {
+                    try await queries.streamRaw(plan) { try await writer.writeBuffer(ByteBuffer(string: $0)) }
+                } catch {
+                    logger.error("AI bot export failed part way: \(String(reflecting: error))")
+                    throw error
+                }
+            }, count: -1)
+        } else {
+            let rows = try await queries.grouped(plan)
+            response.body = .init(string: Self.groupedCSV(rows, plan: plan))
+        }
+        return harden(response)
+    }
+
+    /// A grouped export's whole file.
+    static func groupedCSV(_ rows: [BotExportQueries.GroupedRow], plan: BotExportPlan) -> String {
+        let formatter = BotExportCSV.timestampFormatter(in: plan.timeZone)
+        var csv = BotExportCSV.line(BotExportCSV.groupedColumns(plan.dimensions))
+        for row in rows {
+            let period = plan.periods[row.period]
+            csv += BotExportCSV.line(
+                [period.label, formatter.string(from: period.start), formatter.string(from: period.end), row.audience.csvValue]
+                    + plan.dimensions.flatMap { row.values(for: $0) }
+                    + [String(row.count)]
+            )
+        }
+        return csv
     }
 
     /// The configured database, or `nil` when none is registered under its

@@ -4,9 +4,11 @@ What the dashboard shows, how its filters work, and how it is built.
 
 ## Overview
 
-The dashboard is mounted at ``BotKitConfiguration/Dashboard/path``, `/admin/ai-bots/` by default, once a username and password are configured. It has three routes, all under that path:
+The dashboard is mounted at ``BotKitConfiguration/Dashboard/path``, `/admin/ai-bots/` by default, once a username and password are configured. Its routes, all under that path:
 
 - `GET /admin/ai-bots/`: the dashboard, or the sign-in page when signed out.
+- `GET /admin/ai-bots/pages/`: the Page views tab, with ``BotKitConfiguration/PageViews`` on.
+- `GET /admin/ai-bots/export/` and `GET /admin/ai-bots/export/csv`: the Export tab and the CSV it downloads. See <doc:Exporting>.
 - `POST /admin/ai-bots/login`: signs in with the form fields `username` and `password`.
 - `POST /admin/ai-bots/logout`: signs out.
 
@@ -25,6 +27,8 @@ It is mounted on every host the app answers for, so a multi-site app has one das
 Tracking starts when the middleware is deployed. There is no backfill.
 
 With ``BotKitConfiguration/PageViews`` on, a **Page views** tab sits beside this one at `<path>/pages/`, behind the same sign-in and with the same filters. See <doc:PageViews>.
+
+An **Export** tab, always present, downloads the data as CSV at the level of detail you choose, from raw rows to totals. See <doc:Exporting>.
 
 ### Filters
 

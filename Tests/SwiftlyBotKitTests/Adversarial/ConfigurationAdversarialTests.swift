@@ -291,7 +291,8 @@ final class CfgAdvDateRangeAdversarialTests: XCTestCase {
         var options = BotKitConfiguration.Dashboard()
         options.dateRanges = [.day, .day, .week]
         let html = render(options, range: .day)
-        let pills = html.components(separatedBy: "range=24h").count - 1
+        // Counts the pills' labels, not `range=24h`, which the tab links carry too.
+        let pills = html.components(separatedBy: ">24h</a>").count - 1
         XCTAssertEqual(pills, 1, "API SURPRISE: duplicate dateRanges render duplicate filter pills (\(pills) for 24h).")
     }
 }

@@ -43,7 +43,7 @@ enum PageViewsPage {
                 main {
                     DashboardPage.header(title: options.title, base: base, range: range, siteName: siteName,
                                          generatedAt: generatedAt, timeZone: timeZone)
-                    DashboardPage.filters(base: base, section: .pageViews, showsTabs: true, range: range,
+                    DashboardPage.filters(base: base, section: .pageViews, sections: DashboardSection.available(pageViews: true), range: range,
                                           ranges: options.offeredDateRanges, sites: sites, selectedSite: selectedSite,
                                           audience: audience)
                     if data.total(for: audience) == 0 {
