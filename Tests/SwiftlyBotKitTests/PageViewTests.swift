@@ -97,7 +97,7 @@ final class PageViewFilterTests: XCTestCase {
 
 final class PageViewTallyTests: XCTestCase {
 
-    private func key(_ path: String = "/", bucket: Int64 = 0) -> PageViewTally.Key {
+    private func key(_ path: String = "/", bucket: Int64 = 0) -> PageViewKey {
         .init(siteKey: "default", path: path, bucketStart: bucket)
     }
 

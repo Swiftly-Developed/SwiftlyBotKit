@@ -1,0 +1,267 @@
+import XCTest
+import XCTVapor
+@testable import SwiftlyBotKit
+
+final class UserAgentSummaryTests: XCTestCase {
+
+    private func summary(_ ua: String, brands: String? = nil, mobile: String? = nil) -> UserAgentSummary {
+        UserAgentSummary(userAgent: ua, clientHintBrands: brands, clientHintMobile: mobile)
+    }
+
+    func testCommonBrowsers() {
+        let cases: [(String, UserAgentSummary.Device, String, String, String, String)] = [
+            ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
+             .desktop, "Safari", "Safari 18", "macOS", "macOS"),
+            ("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+             .mobile, "Safari", "Safari 18", "iOS", "iOS 18"),
+            ("Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
+             .tablet, "Safari", "Safari 17", "iPadOS", "iPadOS 17"),
+            ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+             .desktop, "Chrome", "Chrome 128", "Windows", "Windows"),
+            ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 Edg/128.0.2739.42",
+             .desktop, "Edge", "Edge 128", "Windows", "Windows"),
+            ("Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36",
+             .mobile, "Chrome", "Chrome 128", "Android", "Android"),
+            ("Mozilla/5.0 (Android 14; Mobile; rv:130.0) Gecko/130.0 Firefox/130.0",
+             .mobile, "Firefox", "Firefox 130", "Android", "Android 14"),
+            ("Mozilla/5.0 (Linux; Android 13; SM-X700) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/25.0 Chrome/121.0.0.0 Safari/537.36",
+             .tablet, "Samsung Internet", "Samsung Internet 25", "Android", "Android 13"),
+            ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/128.0.6613.98 Mobile/15E148 Safari/604.1",
+             .mobile, "Chrome", "Chrome 128", "iOS", "iOS 17"),
+            ("Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0",
+             .desktop, "Firefox", "Firefox 130", "Linux", "Linux"),
+            ("Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+             .desktop, "Chrome", "Chrome 128", "ChromeOS", "ChromeOS"),
+            ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 [FBAN/FBIOS;FBAV/470.0]",
+             .mobile, "Facebook", "Facebook", "iOS", "iOS 17"),
+            ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+             .mobile, "iOS web view", "iOS web view", "iOS", "iOS 17"),
+        ]
+        for (ua, device, browser, browserVersion, os, osVersion) in cases {
+            let s = summary(ua)
+            XCTAssertEqual(s.device, device, ua)
+            XCTAssertEqual(s.browser, browser, ua)
+            XCTAssertEqual(s.browserVersion, browserVersion, ua)
+            XCTAssertEqual(s.os, os, ua)
+            XCTAssertEqual(s.osVersion, osVersion, ua)
+        }
+    }
+
+    func testClientHints() {
+        let chrome = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+        let brave = summary(chrome, brands: "\"Chromium\";v=\"128\", \"Not;A=Brand\";v=\"24\", \"Brave\";v=\"128\"")
+        XCTAssertEqual(brave.browserVersion, "Brave 128")
+        XCTAssertEqual(summary(chrome, mobile: "?1").device, .mobile)
+    }
+
+    /// A version is a small number or nothing, never whatever the header
+    /// happened to hold.
+    func testGarbageNeverBecomesAValue() {
+        let s = summary("Mozilla/5.0 Firefox/12345678901234567890 <script>")
+        XCTAssertEqual(s.browserVersion, "Firefox")
+        XCTAssertEqual(summary("").browser, UserAgentSummary.otherFamily)
+    }
+}
+
+final class ReferrerSummaryTests: XCTestCase {
+
+    private func summary(_ referer: String?, host: String? = "swiftly-developed.com") -> ReferrerSummary {
+        ReferrerSummary(referer: referer, host: host)
+    }
+
+    func testDirectInternalAndExternal() {
+        XCTAssertEqual(summary(nil).referrer, "(direct)")
+        XCTAssertEqual(summary("").referrer, "(direct)")
+        let internalLink = summary("https://www.swiftly-developed.com/insights/some-article/?utm_source=x#top", host: "swiftly-developed.com:443")
+        XCTAssertEqual(internalLink.referrer, "(internal)")
+        XCTAssertEqual(internalLink.previousPage, "/insights/some-article/")
+        let google = summary("https://www.google.com/search?q=my+name+is+private")
+        XCTAssertEqual(google.referrer, "google.com")
+        XCTAssertEqual(google.previousPage, "(none)")
+        XCTAssertEqual(summary("https://l.facebook.com/l.php?u=x").referrer, "facebook.com")
+        XCTAssertEqual(summary("https://m.example").referrer, "m.example")
+        XCTAssertEqual(summary("https://chatgpt.com/c/abc").referrer, "chatgpt.com")
+        XCTAssertEqual(summary("android-app://com.google.android.gm/").referrer, "android-app://com.google.android.gm")
+    }
+
+    /// Only a hostname survives: no IP literal, no path, no credentials.
+    func testNothingPersonalSurvives() {
+        XCTAssertEqual(summary("http://81.82.83.84/admin").referrer, "(other)")
+        XCTAssertEqual(summary("http://[2a02:1810::1]/").referrer, "(other)")
+        XCTAssertEqual(summary("https://user:secret@example.com/").referrer, "example.com")
+        XCTAssertEqual(summary("javascript:alert(1)").referrer, "(other)")
+        XCTAssertEqual(summary("https://" + String(repeating: "a", count: 120) + ".com/").referrer, "(other)")
+    }
+}
+
+final class CampaignSummaryTests: XCTestCase {
+
+    func testReadsTheFourParameters() {
+        let c = CampaignSummary(query: "utm_source=Newsletter&utm_medium=email&utm_campaign=Continuity+Series&utm_content=footer-link&utm_term=my+secret+query")
+        XCTAssertEqual(c.source, "newsletter")
+        XCTAssertEqual(c.medium, "email")
+        XCTAssertEqual(c.name, "continuity-series")
+        XCTAssertEqual(c.content, "footer-link")
+        let none = CampaignSummary(query: nil)
+        XCTAssertEqual([none.source, none.medium, none.name, none.content], Array(repeating: "(none)", count: 4))
+    }
+
+    /// Anything that could carry a person is refused whole, not cleaned up.
+    func testRefusesIdentifiers() {
+        XCTAssertEqual(CampaignSummary.token("jane.doe@example.com"), "(other)")
+        XCTAssertEqual(CampaignSummary.token("jane.doe%40example.com".removingPercentEncoding!), "(other)")
+        XCTAssertEqual(CampaignSummary.token("user-4815162342"), "(other)")
+        XCTAssertEqual(CampaignSummary.token("spring-2026"), "spring-2026")
+        XCTAssertEqual(CampaignSummary.token(String(repeating: "a", count: 65)), "(other)")
+        XCTAssertEqual(CampaignSummary.token("ünïcode"), "(other)")
+        XCTAssertEqual(CampaignSummary(query: "utm_source=%zz").source, "(other)")
+    }
+}
+
+final class LanguageSummaryTests: XCTestCase {
+    func testPrimarySubtag() {
+        XCTAssertEqual(LanguageSummary.language(acceptLanguage: "nl-BE,nl;q=0.9,en;q=0.8"), "nl")
+        XCTAssertEqual(LanguageSummary.language(acceptLanguage: "EN-us"), "en")
+        XCTAssertEqual(LanguageSummary.language(acceptLanguage: "*"), "(none)")
+        XCTAssertEqual(LanguageSummary.language(acceptLanguage: nil), "(none)")
+        XCTAssertEqual(LanguageSummary.language(acceptLanguage: "fil-PH"), "(other)")
+        XCTAssertEqual(LanguageSummary.language(acceptLanguage: "<b>"), "(other)")
+    }
+}
+
+final class CountryLookupTests: XCTestCase {
+
+    /// A table with 0.0.0.0 ZZ, 1.0.0.0 AU, 81.0.0.0 BE and ::/0 ZZ,
+    /// 2a02:1800:: BE.
+    static func sampleTable() -> Data {
+        var data = Data("BKCC".utf8)
+        data.append(1)
+        let attribution = Array("Test data".utf8)
+        data.append(contentsOf: [0, UInt8(attribution.count)])
+        data.append(contentsOf: attribution)
+        func u32(_ v: UInt32) -> [UInt8] { (0..<4).reversed().map { UInt8(v >> ($0 * 8) & 0xFF) } }
+        func u64(_ v: UInt64) -> [UInt8] { (0..<8).reversed().map { UInt8(v >> ($0 * 8) & 0xFF) } }
+        data.append(contentsOf: u32(3) + u32(2))
+        data.append(contentsOf: u32(0) + u32(0x0100_0000) + u32(0x5100_0000))
+        data.append(contentsOf: Array("ZZAUBE".utf8))
+        data.append(contentsOf: u64(0) + u64(0x2A02_1800_0000_0000))
+        data.append(contentsOf: Array("ZZBE".utf8))
+        return data
+    }
+
+    func testLooksUpBothFamilies() throws {
+        let lookup = try CountryLookup(data: Self.sampleTable())
+        XCTAssertEqual(lookup.attribution, "Test data")
+        XCTAssertEqual(lookup.rangeCount, 5)
+        XCTAssertEqual(lookup.country(for: "81.82.83.84"), "BE")
+        XCTAssertEqual(lookup.country(for: "1.2.3.4"), "AU")
+        XCTAssertEqual(lookup.country(for: "0.0.0.1"), "ZZ")
+        XCTAssertEqual(lookup.country(for: "::ffff:81.1.1.1"), "BE")
+        XCTAssertEqual(lookup.country(for: "2a02:1810::1"), "BE")
+        XCTAssertEqual(lookup.country(for: "2001:db8::1"), "ZZ")
+        XCTAssertEqual(lookup.country(for: "not an ip"), "ZZ")
+        XCTAssertEqual(lookup.country(for: nil), "ZZ")
+    }
+
+    func testRefusesAMalformedTable() {
+        XCTAssertThrowsError(try CountryLookup(data: Data("nope".utf8)))
+        var truncated = Self.sampleTable()
+        truncated.removeLast()
+        XCTAssertThrowsError(try CountryLookup(data: truncated))
+        var badCode = Self.sampleTable()
+        badCode[badCode.count - 1] = UInt8(ascii: "1")
+        XCTAssertThrowsError(try CountryLookup(data: badCode))
+    }
+
+    /// The table the Server ships, when this checkout has it.
+    func testTheShippedTable() throws {
+        let path = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("Server/Data/country-ranges.bin").path
+        guard FileManager.default.fileExists(atPath: path) else { throw XCTSkip("no Server/Data/country-ranges.bin") }
+        let lookup = try CountryLookup(contentsOfFile: path)
+        XCTAssertGreaterThan(lookup.rangeCount, 500_000)
+        XCTAssertEqual(lookup.country(for: "8.8.8.8"), "US")
+        XCTAssertEqual(lookup.country(for: "192.168.1.1"), "ZZ")
+    }
+}
+
+final class PageViewDimensionModelTests: XCTestCase {
+
+    func testPairsNeverRepeatAFamilyOrIncludeThePreviousPage() {
+        XCTAssertEqual(PageViewDimension.pairs.count, 64)
+        XCTAssertFalse(PageViewDimension.pairs.contains { $0 == .previousPage || $1 == .previousPage })
+        XCTAssertFalse(PageViewDimension.isPair(.browser, .browserVersion))
+        XCTAssertTrue(PageViewDimension.isPair(.device, .country))
+        XCTAssertTrue(PageViewDimension.pairs.allSatisfy { $0 < $1 })
+    }
+
+    func testDays() {
+        let brussels = TimeZone(identifier: "Europe/Brussels")!
+        // 2026-09-26 22:30 UTC is already the 27th in Brussels.
+        let late = Date(timeIntervalSince1970: 1_790_461_800)
+        XCTAssertEqual(PageViewDay(late, in: TimeZone(secondsFromGMT: 0)!).isoDate, "2026-09-26")
+        XCTAssertEqual(PageViewDay(late, in: brussels).isoDate, "2026-09-27")
+        XCTAssertEqual(PageViewDay(daysSince1970: 0).isoDate, "1970-01-01")
+        XCTAssertEqual(PageViewDay(daysSince1970: -1).isoDate, "1969-12-31")
+        XCTAssertEqual(PageViewDay(daysSince1970: 11_016).isoDate, "2000-02-29")
+    }
+
+    func testFactsFromARequest() throws {
+        var headers = HTTPHeaders()
+        headers.add(name: .userAgent, value: safariUA)
+        headers.add(name: .referer, value: "https://news.ycombinator.com/item?id=1")
+        headers.add(name: .acceptLanguage, value: "fr-BE,fr;q=0.9")
+        let facts = PageViewFacts.derive(
+            headers: headers, query: "utm_source=hn", host: "swiftly-developed.com",
+            clientIP: "81.82.83.84", countries: try CountryLookup(data: CountryLookupTests.sampleTable())
+        )
+        XCTAssertEqual(facts[.country], "BE")
+        XCTAssertEqual(facts[.referrer], "news.ycombinator.com")
+        XCTAssertEqual(facts[.campaignSource], "hn")
+        XCTAssertEqual(facts[.campaignMedium], "(none)")
+        XCTAssertEqual(facts[.device], "desktop")
+        XCTAssertEqual(facts[.language], "fr")
+        XCTAssertEqual(facts.values.count, PageViewDimension.allCases.count)
+        // Nothing in the facts is the address or a header verbatim.
+        let stored = facts.values.map(\.value)
+        XCTAssertFalse(stored.contains { $0.contains("81.82") || $0.contains("Mozilla") || $0.contains("item?id") })
+
+        let withoutCountries = PageViewFacts.derive(headers: headers, query: nil, host: nil, clientIP: "81.82.83.84", countries: nil)
+        XCTAssertNil(withoutCountries[.country])
+    }
+
+    func testCountingAddsOnePerDimensionAndPair() async {
+        var configuration = BotKitConfiguration.PageViews(isEnabled: true)
+        configuration.dimensions.isEnabled = true
+        let counter = PageViewCounter(database: { nil }, configuration: configuration, logger: Logger(label: "test"))
+        var headers = HTTPHeaders()
+        headers.add(name: .userAgent, value: safariUA)
+        let facts = PageViewFacts.derive(headers: headers, query: nil, host: nil, clientIP: nil, countries: nil)
+        counter.record(siteKey: "a", path: "/x/", facts: facts)
+        counter.record(siteKey: "a", path: "/x/", facts: facts)
+        let dimensions = counter.dimensionTally!.drain()
+        XCTAssertEqual(dimensions.count, PageViewDimension.allCases.count - 1)
+        XCTAssertTrue(dimensions.values.allSatisfy { $0 == 2 })
+        let pairs = counter.pairTally!.drain()
+        // Twelve pairable dimensions without the country: 11 choose 2, less
+        // the two family pairs.
+        XCTAssertEqual(pairs.count, 53)
+        await counter.shutdown()
+    }
+
+    func testCampaignValuesAreCappedPerDay() {
+        let cap = CampaignValueCap(maximum: 2)
+        let day = PageViewDay(daysSince1970: 20_000)
+        func facts(_ source: String) -> PageViewFacts {
+            PageViewFacts.derive(headers: [:], query: "utm_source=\(source)", host: nil, clientIP: nil, countries: nil)
+        }
+        XCTAssertEqual(cap.capped(facts("a"), siteKey: "s", day: day)[.campaignSource], "a")
+        XCTAssertEqual(cap.capped(facts("b"), siteKey: "s", day: day)[.campaignSource], "b")
+        XCTAssertEqual(cap.capped(facts("c"), siteKey: "s", day: day)[.campaignSource], "(other)")
+        XCTAssertEqual(cap.capped(facts("a"), siteKey: "s", day: day)[.campaignSource], "a")
+        XCTAssertEqual(cap.capped(facts("c"), siteKey: "other-site", day: day)[.campaignSource], "c")
+        let tomorrow = PageViewDay(daysSince1970: 20_001)
+        XCTAssertEqual(cap.capped(facts("c"), siteKey: "s", day: tomorrow)[.campaignSource], "c")
+    }
+}

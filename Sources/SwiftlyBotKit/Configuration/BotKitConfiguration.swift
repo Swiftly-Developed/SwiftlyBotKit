@@ -330,16 +330,99 @@ extension BotKitConfiguration {
         /// Default `10_000`.
         public var maximumPendingCounters: Int
 
+        /// Breakdowns of each view by country, referrer, campaign, device,
+        /// browser, operating system and language. Off by default; needs
+        /// ``isEnabled`` as well.
+        public var dimensions: Dimensions
+
         /// Creates a page view configuration.
         public init(
             isEnabled: Bool = false,
             flushInterval: TimeInterval = 10,
-            maximumPendingCounters: Int = 10_000
+            maximumPendingCounters: Int = 10_000,
+            dimensions: Dimensions = .default
         ) {
             self.isEnabled = isEnabled
             self.flushInterval = flushInterval
             self.maximumPendingCounters = maximumPendingCounters
+            self.dimensions = dimensions
         }
+    }
+}
+
+extension BotKitConfiguration.PageViews {
+
+    /// Anonymous breakdowns of page views, one ``PageViewDimension`` at a
+    /// time.
+    ///
+    /// Each counted view is summarised in memory into one coarse value per
+    /// dimension (a country code, a referring host, a browser family), and
+    /// only those values' counts are written: per site, day, dimension, value
+    /// and page in `page_view_dimension_counts`, and per site, day and pair
+    /// of dimensions in `page_view_pair_counts`. The IP address, user agent,
+    /// full referrer and query string are read to make the summary and then
+    /// dropped. No row holds more than two dimensions, and days rather than
+    /// quarter-hours keep the counts in each row large.
+    ///
+    /// The country needs a table built by `Scripts/update-country-database.py`
+    /// (``countryDatabasePath``); without one every other dimension is still
+    /// recorded and the country is left out.
+    ///
+    /// The tables are registered by `BotKit.configure(for:database:pageViews:pageViewDimensions:)`
+    /// with `pageViewDimensions: true`, or by `BotKit.install(on:config:)`.
+    public struct Dimensions: Sendable, Equatable {
+
+        /// Dimensions off.
+        public static let `default` = Dimensions()
+
+        /// Record the dimensions. Default `false`.
+        public var isEnabled: Bool
+
+        /// The country table `Scripts/update-country-database.py` writes,
+        /// read once at install. `nil`, a missing file or an unreadable one
+        /// leaves the country out (the last two log an error). Default `nil`.
+        public var countryDatabasePath: String?
+
+        /// Counts below this are shown as `<N` on the dashboard and in
+        /// exports, so a breakdown never points at one reader. Values below
+        /// 3 count as 3. Default `5`.
+        public var smallCellThreshold: Int
+
+        /// The most distinct campaign values (per site, day and `utm_`
+        /// parameter) stored as themselves; later ones that day are stored
+        /// as `(other)`. Campaign values come from the URL, so anyone can
+        /// invent them; this stops a flood of junk links from filling the
+        /// tables. Values below 1 count as 1. Default `200`.
+        public var maximumCampaignValuesPerDay: Int
+
+        /// The most distinct dimension counters (site, day, dimension, value
+        /// and page) held in memory between writes. Beyond it further
+        /// dimension counts are dropped with a warning; the page view itself
+        /// is still counted. Values below 1 count as 1. Default `50_000`.
+        public var maximumPendingDimensionCounters: Int
+
+        /// The same for pair counters. Default `100_000`.
+        public var maximumPendingPairCounters: Int
+
+        /// Creates a dimensions configuration.
+        public init(
+            isEnabled: Bool = false,
+            countryDatabasePath: String? = nil,
+            smallCellThreshold: Int = 5,
+            maximumCampaignValuesPerDay: Int = 200,
+            maximumPendingDimensionCounters: Int = 50_000,
+            maximumPendingPairCounters: Int = 100_000
+        ) {
+            self.isEnabled = isEnabled
+            self.countryDatabasePath = countryDatabasePath
+            self.smallCellThreshold = smallCellThreshold
+            self.maximumCampaignValuesPerDay = maximumCampaignValuesPerDay
+            self.maximumPendingDimensionCounters = maximumPendingDimensionCounters
+            self.maximumPendingPairCounters = maximumPendingPairCounters
+        }
+
+        /// ``smallCellThreshold`` with its floor applied.
+        public var effectiveSmallCellThreshold: Int { max(3, smallCellThreshold) }
     }
 }
 

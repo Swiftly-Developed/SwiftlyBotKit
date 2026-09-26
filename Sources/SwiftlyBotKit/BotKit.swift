@@ -55,7 +55,16 @@ public enum BotKit {
     /// Registers the migrations once per application: a second call logs an
     /// error and does nothing, since a duplicate would fail `autoMigrate` on
     /// its `CREATE TYPE`.
-    public static func configure(for app: Application, database: DatabaseID? = nil, pageViews: Bool = false) {
+    ///
+    /// With `pageViewDimensions` as well, it registers the two tables
+    /// ``BotKitConfiguration/PageViews/Dimensions`` writes to. Pass `true`
+    /// exactly when `config.pageViews.dimensions.isEnabled` is.
+    public static func configure(
+        for app: Application,
+        database: DatabaseID? = nil,
+        pageViews: Bool = false,
+        pageViewDimensions: Bool = false
+    ) {
         let registered = app.storage[InstallationKey.self]?.migrationRegistered ?? false
         guard !registered else {
             app.logger.error("BotKit.configure(for:) was called again; the migration is already registered, so this call does nothing.")
@@ -65,9 +74,15 @@ public enum BotKit {
         if pageViews {
             app.migrations.add(CreatePageViewCounts(), to: database)
         }
+        let dimensions = pageViews && pageViewDimensions
+        if dimensions {
+            app.migrations.add(CreatePageViewDimensionCounts(), to: database)
+            app.migrations.add(CreatePageViewPairCounts(), to: database)
+        }
         markInstalled(app) {
             $0.migrationRegistered = true
             $0.pageViewsMigrationRegistered = pageViews
+            $0.pageViewDimensionsMigrationRegistered = dimensions
         }
     }
 
@@ -98,6 +113,11 @@ public enum BotKit {
            let installation = app.storage[InstallationKey.self], installation.migrationRegistered,
            !installation.pageViewsMigrationRegistered {
             throw BotKitConfigurationError.pageViewsNotMigrated
+        }
+        if config.pageViews.isEnabled, config.pageViews.dimensions.isEnabled,
+           let installation = app.storage[InstallationKey.self], installation.migrationRegistered,
+           !installation.pageViewDimensionsMigrationRegistered {
+            throw BotKitConfigurationError.pageViewDimensionsNotMigrated
         }
         var config = config
         let duplicates = config.duplicateSiteKeys
@@ -146,12 +166,17 @@ public enum BotKit {
                     return app.db(databaseID) as? SQLDatabase
                 },
                 configuration: config.pageViews,
+                timeZone: config.dashboard.timeZone.foundationTimeZone,
                 logger: app.logger
             )
+            let dimensions = config.pageViews.dimensions
             app.middleware.use(PageViewCountingMiddleware(
                 filter: PageViewFilter(classifier: runtime.classifier),
                 counter: counter,
-                siteKey: config.siteKey
+                siteKey: config.siteKey,
+                recordsDimensions: dimensions.isEnabled,
+                clientIP: config.clientIP,
+                countries: dimensions.isEnabled ? loadCountries(dimensions, logger: app.logger) : nil
             ))
             app.lifecycle.use(PageViewLifecycle(counter: counter))
             app.storage[PageViewCounterKey.self] = counter
@@ -208,7 +233,8 @@ public enum BotKit {
         // Validate before registering anything, so a bad configuration
         // leaves the application untouched.
         try config.validate()
-        configure(for: app, database: config.database, pageViews: config.pageViews.isEnabled)
+        configure(for: app, database: config.database, pageViews: config.pageViews.isEnabled,
+                  pageViewDimensions: config.pageViews.dimensions.isEnabled)
         try configureRoutes(for: app, config: config)
     }
 
@@ -216,6 +242,7 @@ public enum BotKit {
     struct Installation: Sendable {
         var migrationRegistered = false
         var pageViewsMigrationRegistered = false
+        var pageViewDimensionsMigrationRegistered = false
         var routesConfigured = false
     }
 
@@ -226,6 +253,23 @@ public enum BotKit {
     /// The application's page view counter, when page views are on.
     struct PageViewCounterKey: StorageKey {
         typealias Value = PageViewCounter
+    }
+
+    /// The country table for the dimensions, or `nil` (with the reason
+    /// logged) when none is configured or it cannot be read.
+    static func loadCountries(_ dimensions: BotKitConfiguration.PageViews.Dimensions, logger: Logger) -> CountryLookup? {
+        guard let path = dimensions.countryDatabasePath else {
+            logger.info("No country database is configured for page view dimensions, so views are not broken down by country.")
+            return nil
+        }
+        do {
+            let lookup = try CountryLookup(contentsOfFile: path)
+            logger.info("Loaded \(lookup.rangeCount) country ranges for page view dimensions (\(lookup.attribution)).")
+            return lookup
+        } catch {
+            logger.error("Page views are not broken down by country: \(error)")
+            return nil
+        }
     }
 
     private static func markInstalled(_ app: Application, _ update: (inout Installation) -> Void) {

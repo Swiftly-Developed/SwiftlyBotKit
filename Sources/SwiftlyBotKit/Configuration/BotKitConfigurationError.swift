@@ -29,6 +29,12 @@ public enum BotKitConfigurationError: Error, Sendable, Equatable, CustomStringCo
     /// true`, so the table the counts go into would never be created.
     case pageViewsNotMigrated
 
+    /// ``BotKitConfiguration/PageViews/Dimensions/isEnabled`` is on, but
+    /// `BotKit.configure(for:database:pageViews:pageViewDimensions:)` ran
+    /// without `pageViewDimensions: true`, so the tables the breakdowns go
+    /// into would never be created.
+    case pageViewDimensionsNotMigrated
+
     /// A colour in ``BotKitConfiguration/SignInPage`` is not a plain CSS
     /// colour (named field, value).
     case invalidSignInColor(String, String)
@@ -54,6 +60,8 @@ public enum BotKitConfigurationError: Error, Sendable, Equatable, CustomStringCo
             return "Invalid BotKit sign-in logo URL \(String(url.prefix(120)).debugDescription): use a root-relative path such as /images/logo.png, an absolute https URL, or a data:image/ URL, without quotes, spaces or angle brackets."
         case .pageViewsNotMigrated:
             return "BotKit page views are enabled, but BotKit.configure(for:database:pageViews:) was called without pageViews: true, so their table is never created. Pass pageViews: true there, or use BotKit.install(on:config:)."
+        case .pageViewDimensionsNotMigrated:
+            return "BotKit page view dimensions are enabled, but BotKit.configure(for:database:pageViews:pageViewDimensions:) was called without pageViewDimensions: true, so their tables are never created. Pass pageViewDimensions: true there, or use BotKit.install(on:config:)."
         }
     }
 }
