@@ -651,6 +651,12 @@ final class AuthSecurityAdversarialTests_RequestForgeryAndHeaderAdversarialTests
             [("Host", "bots.example:443"), ("Origin", "https://BOTS.example")],
             [("Sec-Fetch-Site", "same-origin")],
             [],
+            // What a real browser sent on 2026-09-26 when the dashboard still
+            // answered `Referrer-Policy: no-referrer`: the form's POST carried
+            // `Origin: null`. Fetch Metadata says same-origin, so it is allowed.
+            [("Host", "bots.example"), ("Origin", "null"), ("Sec-Fetch-Site", "same-origin")],
+            [("Host", "bots.example"), ("Origin", "https://bots.example"), ("Sec-Fetch-Site", "same-origin")],
+            [("Sec-Fetch-Site", "none")],
         ]
         for extra in cases {
             let res = try await app.sendRequest(
@@ -667,6 +673,12 @@ final class AuthSecurityAdversarialTests_RequestForgeryAndHeaderAdversarialTests
     func testCrossSiteVariantsAreRefused() async throws {
         let cases: [[(String, String)]] = [
             [("Sec-Fetch-Site", "cross-site")],
+            // Another subdomain of the same site (say, a dev deploy) is not
+            // the dashboard's origin.
+            [("Sec-Fetch-Site", "same-site")],
+            [("Host", "bots.example"), ("Origin", "https://bots.example"), ("Sec-Fetch-Site", "cross-site")],
+            // Without Fetch Metadata there is nothing to vouch for an opaque origin.
+            [("Host", "bots.example"), ("Origin", "null")],
             [("Host", "bots.example"), ("Origin", "https://bots.example.evil.example")],
             [("Host", "bots.example"), ("Origin", "https://bots.example:8443")],
             [("Host", "bots.example"), ("Origin", "file://bots.example")],
@@ -694,7 +706,7 @@ final class AuthSecurityAdversarialTests_RequestForgeryAndHeaderAdversarialTests
         for res in responses {
             XCTAssertEqual(res.headers.first(name: "X-Frame-Options"), "DENY")
             XCTAssertEqual(res.headers.first(name: "X-Content-Type-Options"), "nosniff")
-            XCTAssertEqual(res.headers.first(name: "Referrer-Policy"), "no-referrer")
+            XCTAssertEqual(res.headers.first(name: "Referrer-Policy"), "same-origin")
             XCTAssertEqual(res.headers.first(name: .cacheControl), "no-store")
             XCTAssertEqual(
                 res.headers.first(name: "Content-Security-Policy"),

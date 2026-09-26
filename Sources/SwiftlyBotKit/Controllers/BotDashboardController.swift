@@ -296,7 +296,14 @@ struct BotDashboardController: RouteCollection {
 
     /// Whether a state-changing POST came from another site.
     ///
-    /// Refused when `Sec-Fetch-Site` says `cross-site`, or when an `Origin`
+    /// When the browser sends `Sec-Fetch-Site` (every current browser does,
+    /// and a page cannot set or forge it), that decides: only `same-origin`
+    /// and `none` (the user acting directly) are allowed, so `same-site` and
+    /// `cross-site` are refused. The `Origin` header is not consulted then,
+    /// because a browser may legitimately send `Origin: null` for a
+    /// same-origin form, for example under a `no-referrer` policy.
+    ///
+    /// Without `Sec-Fetch-Site`: refused when an `Origin`
     /// header is present and its host does not match the request's `Host`
     /// (or an `X-Forwarded-Host` entry, for proxies that rewrite `Host`; a
     /// browser cannot set that header on a forged request). An opaque
@@ -304,7 +311,9 @@ struct BotDashboardController: RouteCollection {
     /// one from `curl` or an older browser, is allowed: the attack being
     /// stopped here needs a victim's browser, which sends at least one.
     static func isCrossSite(_ headers: HTTPHeaders) -> Bool {
-        if headers.first(name: "Sec-Fetch-Site")?.lowercased() == "cross-site" { return true }
+        if let site = headers.first(name: "Sec-Fetch-Site")?.trimmingCharacters(in: .whitespaces).lowercased() {
+            return site != "same-origin" && site != "none"
+        }
         guard let origin = headers.first(name: .origin) else { return false }
         guard let originAuthority = authority(ofOrigin: origin) else { return true }
         var allowed = headers[.host].map { normalizedAuthority($0) }
@@ -362,7 +371,11 @@ struct BotDashboardController: RouteCollection {
             ("X-Robots-Tag", "noindex, nofollow"),
             ("X-Frame-Options", "DENY"),
             ("X-Content-Type-Options", "nosniff"),
-            ("Referrer-Policy", "no-referrer"),
+            // Not `no-referrer`: under it browsers send `Origin: null` on the
+            // dashboard's own sign-in form, which the cross-site check has to
+            // refuse for a browser without Fetch Metadata. `same-origin` still
+            // sends nothing to any other site.
+            ("Referrer-Policy", "same-origin"),
             ("Content-Security-Policy", contentSecurityPolicy),
         ]
     }

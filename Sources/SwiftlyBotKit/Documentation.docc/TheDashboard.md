@@ -65,7 +65,7 @@ Sessions are a signed cookie, not server state, so a sign-in survives a restart 
 
 Username and password are both compared on every attempt, in constant time, so a failure does not reveal which half was wrong. A username or password that is empty or only whitespace counts as not configured, and the dashboard is not mounted. Successful sign-ins are logged at `info` and failed ones at `warning`, with a keyed hash of the client address rather than the address.
 
-Sign-in and sign-out refuse cross-site requests with 403: a request whose `Sec-Fetch-Site` header is `cross-site`, or whose `Origin` header does not match its `Host` (or `X-Forwarded-Host`). A request carrying neither header, such as one from `curl`, is allowed.
+Sign-in and sign-out refuse cross-site requests with 403. When the browser sends `Sec-Fetch-Site`, as every current browser does, only `same-origin` (and `none`) is allowed. Otherwise a request is refused when its `Origin` header does not match its `Host` (or `X-Forwarded-Host`), including an opaque `Origin: null`. A request carrying neither header, such as one from `curl`, is allowed.
 
 #### Throttling
 

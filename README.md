@@ -439,9 +439,9 @@ also expire that one, and a valid token is accepted whichever of the
 same-named cookies carries it. Changing the password signs every session out. Signing out
 only clears the browser's cookie: a copy taken earlier stays valid until it
 expires, so change the password if a cookie may have leaked. Sign-in and
-sign-out refuse cross-site requests (by `Origin` and `Sec-Fetch-Site`), and
+sign-out refuse cross-site requests (by `Sec-Fetch-Site`, else `Origin`), and
 every dashboard response sends `no-store`, `X-Frame-Options: DENY`,
-`nosniff`, `Referrer-Policy: no-referrer`, `noindex` and a
+`nosniff`, `Referrer-Policy: same-origin`, `noindex` and a
 `Content-Security-Policy` that allows no script.
 
 **Signing secret.** Set `BOT_DASHBOARD_SECRET` in production to a long random

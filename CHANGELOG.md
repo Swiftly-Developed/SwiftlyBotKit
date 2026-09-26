@@ -24,6 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Signing in to the dashboard from a browser failed with 403 ("Cross-site
+  requests to the dashboard are refused"). The dashboard sent
+  `Referrer-Policy: no-referrer`, under which browsers send `Origin: null` on
+  the sign-in form, and the cross-site check refused that. `Sec-Fetch-Site`,
+  when present, now decides on its own (only `same-origin` and `none` pass,
+  so `same-site` is now refused too), and the policy is `same-origin`, which
+  still sends no referrer to other sites.
+
 - The tutorials page is now published at `tutorials/meetswiftlybotkit`, the
   address the README links to. DocC names the page after its file, which was
   `TableOfContents.tutorial`.

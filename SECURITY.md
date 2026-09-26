@@ -73,12 +73,13 @@ Out of scope:
   accepted. The cookie is `HttpOnly`, `SameSite=Lax`, scoped with `Path` to
   the dashboard path, and `Secure` according to `dashboard.secureCookies`.
 - **Cross-site requests.** `POST .../login` and `POST .../logout` answer 403
-  when `Sec-Fetch-Site` is `cross-site`, or when an `Origin` header is present
-  and does not match the request's `Host` (or `X-Forwarded-Host`). Clients
-  that send neither header, such as `curl`, are unaffected.
+  when `Sec-Fetch-Site` is anything but `same-origin` (or `none`), or, for a
+  browser that does not send it, when an `Origin` header is present and does
+  not match the request's `Host` (or `X-Forwarded-Host`), `Origin: null`
+  included. Clients that send neither header, such as `curl`, are unaffected.
 - **Response headers.** Every dashboard, sign-in and sign-out response sends
   `Cache-Control: no-store`, `X-Frame-Options: DENY`,
-  `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`,
   `X-Robots-Tag: noindex, nofollow` and
   `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`
   (plus the origin of any absolute `logoPath` URL in `img-src`). The pages use
