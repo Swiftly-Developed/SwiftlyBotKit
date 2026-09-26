@@ -29,6 +29,14 @@ public enum BotKitConfigurationError: Error, Sendable, Equatable, CustomStringCo
     /// true`, so the table the counts go into would never be created.
     case pageViewsNotMigrated
 
+    /// A colour in ``BotKitConfiguration/SignInPage`` is not a plain CSS
+    /// colour (named field, value).
+    case invalidSignInColor(String, String)
+
+    /// ``SignInLogo/image(url:altText:)`` has a URL that is not a
+    /// root-relative path, an absolute http(s) URL or a `data:image/` URL.
+    case invalidSignInLogo(String)
+
     /// A description of what is wrong and how to fix it.
     public var description: String {
         switch self {
@@ -40,6 +48,10 @@ public enum BotKitConfigurationError: Error, Sendable, Equatable, CustomStringCo
             return "The BotKit site key \(key.debugDescription) is reserved for the dashboard's all-sites view. Give that site another key."
         case .alreadyInstalled(let detail):
             return "BotKit is already installed on this application: \(detail)"
+        case .invalidSignInColor(let name, let value):
+            return "Invalid BotKit sign-in page colour \(name) = \(value.debugDescription): use a CSS colour such as #6366F1, rgb(99 102 241) or white, using only letters, digits, spaces and # ( ) , . % / -."
+        case .invalidSignInLogo(let url):
+            return "Invalid BotKit sign-in logo URL \(String(url.prefix(120)).debugDescription): use a root-relative path such as /images/logo.png, an absolute https URL, or a data:image/ URL, without quotes, spaces or angle brackets."
         case .pageViewsNotMigrated:
             return "BotKit page views are enabled, but BotKit.configure(for:database:pageViews:) was called without pageViews: true, so their table is never created. Pass pageViews: true there, or use BotKit.install(on:config:)."
         }
@@ -53,6 +65,7 @@ extension BotKitConfiguration {
     func validate() throws {
         try dashboard.validatePath()
         try dashboard.validateCookieName()
+        try dashboard.signInPage.validate()
         if let site = sites.first(where: { $0.key == Self.reservedAllSitesKey }) {
             throw BotKitConfigurationError.reservedSiteKey(site.key)
         }

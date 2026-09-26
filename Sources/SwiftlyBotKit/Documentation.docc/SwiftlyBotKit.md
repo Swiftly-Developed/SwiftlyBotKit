@@ -80,5 +80,8 @@ SwiftlyBotKit needs PostgreSQL at runtime. The package depends on Fluent and SQL
 ### Dashboard
 
 - <doc:TheDashboard>
+- ``BotKitConfiguration/SignInPage``
+- ``SignInLogo``
+- ``SignInColors``
 - ``BotDashboardSite``
 - ``BotDateRange``

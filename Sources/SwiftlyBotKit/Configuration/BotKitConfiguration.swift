@@ -563,6 +563,10 @@ extension BotKitConfiguration {
         /// fifteen minutes.
         public var loginLimit: LoginLimit
 
+        /// The sign-in page's logo and colours. Default: the SwiftlyBotKit
+        /// logo and the dashboard's own colours.
+        public var signInPage: SignInPage
+
         /// Creates a dashboard configuration.
         public init(
             isEnabled: Bool = true,
@@ -576,7 +580,8 @@ extension BotKitConfiguration {
             sessionCookieName: String = "botkit_dashboard",
             sessionLifetime: TimeInterval = 12 * 60 * 60,
             secureCookies: SecureCookiePolicy = .automatic,
-            loginLimit: LoginLimit = .default
+            loginLimit: LoginLimit = .default,
+            signInPage: SignInPage = .default
         ) {
             self.isEnabled = isEnabled
             self.path = path
@@ -590,6 +595,7 @@ extension BotKitConfiguration {
             self.sessionLifetime = sessionLifetime
             self.secureCookies = secureCookies
             self.loginLimit = loginLimit
+            self.signInPage = signInPage
         }
 
         /// ``path`` with exactly one leading slash and no trailing slash.

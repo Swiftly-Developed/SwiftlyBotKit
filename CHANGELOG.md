@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `BotKit.configure(for:database:pageViews:)` registers the page view table
   when `pageViews` is `true`; `install(on:config:)` does so from the
   configuration.
+- A logo above the dashboard's sign-in form, the SwiftlyBotKit logo by
+  default (embedded, nothing to host), and configurable sign-in colours:
+  `dashboard.signInPage` (`SignInPage`, `SignInLogo`, `SignInColors`), with
+  optional separate dark-mode colours. Unsafe colours or logo URLs throw
+  `invalidSignInColor` / `invalidSignInLogo` at install.
 - `BotKitConfigurationError.pageViewsNotMigrated`, thrown when page views are
   enabled but their table was not registered.
 

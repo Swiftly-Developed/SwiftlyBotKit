@@ -34,7 +34,9 @@ struct BotDashboardController: RouteCollection {
         self.username = username
         self.password = password
         self.sessionBinding = runtime.signer.credentialBinding(username: username, password: password)
-        self.contentSecurityPolicy = Self.contentSecurityPolicy(logoPaths: config.sites.compactMap(\.logoPath))
+        self.contentSecurityPolicy = Self.contentSecurityPolicy(
+            logoPaths: config.sites.compactMap(\.logoPath) + [config.dashboard.signInPage.logoOrigin].compactMap { $0 }
+        )
     }
 
     func boot(routes: RoutesBuilder) throws {

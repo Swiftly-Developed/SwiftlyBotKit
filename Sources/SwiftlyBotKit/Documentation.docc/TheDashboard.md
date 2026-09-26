@@ -67,6 +67,19 @@ Username and password are both compared on every attempt, in constant time, so a
 
 Sign-in and sign-out refuse cross-site requests with 403. When the browser sends `Sec-Fetch-Site`, as every current browser does, only `same-origin` (and `none`) is allowed. Otherwise a request is refused when its `Origin` header does not match its `Host` (or `X-Forwarded-Host`), including an opaque `Origin: null`. A request carrying neither header, such as one from `curl`, is allowed.
 
+#### The sign-in page
+
+The SwiftlyBotKit logo sits above the form by default. ``BotKitConfiguration/Dashboard/signInPage`` changes it and the page's colours:
+
+```swift
+config.dashboard.signInPage = .init(
+    logo: .image(url: "/images/acme-logo.png", altText: "Acme"),
+    colors: .init(background: "#0B1020", card: "#121A33", button: "#6366F1", buttonText: "white")
+)
+```
+
+``SignInLogo/image(url:altText:)`` takes a root-relative path your app serves, an absolute `https` URL (its origin is added to the page's `img-src`), or a `data:image/` URL; ``SignInLogo/none`` shows no logo. Every ``SignInColors`` field is optional and anything left `nil` keeps the dashboard's colour. The colours apply in light and dark mode alike unless ``BotKitConfiguration/SignInPage/darkColors`` is set. Colours and the logo URL are written into the page, so values that are not plain colours or URLs make `BotKit.configureRoutes(for:config:)` throw ``BotKitConfigurationError/invalidSignInColor(_:_:)`` or ``BotKitConfigurationError/invalidSignInLogo(_:)``.
+
 #### Throttling
 
 Failed attempts are limited by ``BotKitConfiguration/Dashboard/loginLimit`` in two ways, both in memory and per process:

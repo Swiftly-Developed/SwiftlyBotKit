@@ -325,6 +325,7 @@ is not installed.
 | `sessionCookieName` | `botkit_dashboard` | Session cookie name. |
 | `sessionLifetime` | 12 hours | How long a sign-in lasts. |
 | `secureCookies` | `.automatic` | When the cookie is `Secure`: `.automatic`, `.always` or `.never`. |
+| `signInPage` | SwiftlyBotKit logo, dashboard colours | `SignInPage(logo:colors:darkColors:)`. `logo`: `.swiftlyBotKit` (embedded), `.image(url:altText:)` for your own, or `.none`. `colors`/`darkColors`: `SignInColors` (background, card, text, secondaryText, border, button, buttonText), each optional; without `darkColors`, `colors` applies in both modes. Invalid values throw at install. |
 | `loginLimit` | 5 failures per 15 minutes | `LoginLimit(maximumFailures:window:)`, per client (IPv6 per /64), in memory. A process-wide ceiling of 50 failures per window applies on top. |
 
 The dashboard is mounted only when both `username` and `password` resolve to
