@@ -6,7 +6,15 @@ Count how often people read each page, next to how often AI agents do, without s
 
 The AI agent numbers mean more with something to compare them to. A page that ChatGPT-User fetched forty times last week is a different story when people read it four hundred times than when they read it four. Page views give that comparison, in the same dashboard, without a second analytics product.
 
-They are off by default. When turned on, the dashboard gains a **Page views** tab at `<dashboard path>/pages/`, with the same site switcher and date ranges: total views, pages read, a chart over time, and the most-viewed pages with each page's AI agent requests beside it.
+They are off by default. When turned on, the dashboard gains a **Page views** tab at `<dashboard path>/pages/`, with the same site switcher and date ranges: total reads, pages read, a chart over time, and the most-read pages.
+
+An audience filter chooses whose reads the tab shows (`?audience=` in the URL, kept by every link on the tab):
+
+- **People** (the default): the page view counts described below, with each page's AI agent reads beside it.
+- **AI agents**: successful `GET` page requests by agents in the catalog, from the same table the AI agents tab reads, with each page's page views beside it. `robots.txt`, sitemaps and failed requests are left out, since nobody reads those; they stay on the AI agents tab.
+- **Combined**: both, stacked in two colours in the chart and in every page's bar, so the split stays visible.
+
+When page views were turned on inside the chosen window, the chart says from when people were counted, and the people average covers only the time since.
 
 ### What is stored
 

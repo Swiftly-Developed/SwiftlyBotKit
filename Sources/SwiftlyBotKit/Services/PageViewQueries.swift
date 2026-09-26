@@ -1,32 +1,74 @@
 import Foundation
 import SQLKit
 
-/// What the "Page views" tab shows.
-struct PageViewData: Sendable {
-    struct PageRow: Sendable {
-        let path: String
-        let views: Int
-        /// AI agent requests for the same path in the same window, from
-        /// `ai_bot_visits`, so a page's human and machine readership sit side
-        /// by side.
-        let agentVisits: Int
+/// Whose page reads the "Page views" tab shows, from `?audience=`.
+enum PageViewAudience: String, CaseIterable, Sendable {
+    /// People in a browser, from `page_view_counts`. The default.
+    case people
+    /// AI agents' successful page requests, from `ai_bot_visits`.
+    case agents
+    /// Both, drawn as two parts of every bar.
+    case combined = "all"
+
+    var label: String {
+        switch self {
+        case .people: return "People"
+        case .agents: return "AI agents"
+        case .combined: return "Combined"
+        }
     }
 
-    var totalViews = 0
-    var distinctPages = 0
-    /// AI agent requests in the same window and site, for scale.
-    var agentVisits = 0
-    var series: [(bucket: Date, count: Int)] = []
-    var topPages: [PageRow] = []
+    init(query raw: String?) {
+        self = raw.flatMap(PageViewAudience.init(rawValue:)) ?? .people
+    }
 
-    var isEmpty: Bool { totalViews == 0 }
+    var includesPeople: Bool { self != .agents }
+    var includesAgents: Bool { self != .people }
+}
+
+/// What the "Page views" tab shows. Every figure is split into people and AI
+/// agents; the audience decides which of them the page uses.
+struct PageViewData: Sendable {
+    struct PageRow: Sendable, Equatable {
+        let path: String
+        let people: Int
+        let agents: Int
+    }
+
+    struct SeriesPoint: Sendable, Equatable {
+        let bucket: Date
+        let people: Int
+        let agents: Int
+    }
+
+    var people = 0
+    var agents = 0
+    /// Distinct paths with at least one read by the chosen audience.
+    var distinctPages = 0
+    var series: [SeriesPoint] = []
+    var topPages: [PageRow] = []
+    /// The first counted page view, when counting began inside the window.
+    /// People figures before it are not zero but unknown.
+    var peopleCountedSince: Date?
+    /// How many of the window's buckets lie after counting began: the
+    /// divisor for a people-per-bucket average.
+    var peopleBucketCount = 0
+
+    func total(for audience: PageViewAudience) -> Int {
+        (audience.includesPeople ? people : 0) + (audience.includesAgents ? agents : 0)
+    }
 }
 
 /// The page view aggregates. PostgreSQL only, like ``BotDashboardQueries``,
 /// and bucketed the same way: Swift computes every boundary and PostgreSQL
-/// only sorts the stored quarter-hours between them with `width_bucket`.
-/// A quarter-hour never straddles a boundary, because every zone's offset is
-/// a whole number of quarter-hours.
+/// only sorts rows between them with `width_bucket`. A stored quarter-hour
+/// never straddles a boundary, because every zone's offset is a whole number
+/// of quarter-hours.
+///
+/// AI agent reads are the rows ``BotDashboardQueries`` counts as agent visits,
+/// narrowed to what a person could have read: a successful `GET` of a page.
+/// `robots.txt`, sitemaps and errors stay on the AI agents tab, so "combined"
+/// adds like to like.
 struct PageViewQueries: Sendable {
     let database: any SQLDatabase
     let timeZone: TimeZone
@@ -34,103 +76,145 @@ struct PageViewQueries: Sendable {
     /// How many pages the top list shows.
     static let topPageLimit = 25
 
-    func load(range: BotDateRange, siteKey: String?, now: Date = Date()) async throws -> PageViewData {
+    /// The `ai_bot_visits` rows that count as an AI agent reading a page.
+    static let agentReadFilter = """
+        agent_name IS NOT NULL AND method = 'GET' AND status_code BETWEEN 200 AND 299 \
+        AND path NOT LIKE '%.txt' AND path NOT LIKE '%.xml'
+        """
+
+    func load(
+        range: BotDateRange,
+        siteKey: String?,
+        audience: PageViewAudience = .people,
+        now: Date = Date()
+    ) async throws -> PageViewData {
         let window = range.window(now: now, in: timeZone)
         var data = PageViewData()
-        let totals = try await totals(since: window.start, siteKey: siteKey)
-        data.totalViews = totals.views
-        data.distinctPages = totals.pages
-        data.series = try await series(window: window, siteKey: siteKey)
-        let pages = try await topPages(since: window.start, siteKey: siteKey)
-        let agents = try await agentVisits(since: window.start, siteKey: siteKey, paths: pages.map(\.path))
-        data.agentVisits = agents.total
-        data.topPages = pages.map { .init(path: $0.path, views: $0.views, agentVisits: agents.byPath[$0.path] ?? 0) }
+        let people = try await peopleSeries(window: window, siteKey: siteKey)
+        let agents = try await agentSeries(window: window, siteKey: siteKey)
+        data.series = zip(window.buckets, zip(people, agents)).map {
+            .init(bucket: $0.start, people: $1.0, agents: $1.1)
+        }
+        data.people = people.reduce(0, +)
+        data.agents = agents.reduce(0, +)
+        let (pages, distinct) = try await topPages(since: window.start, siteKey: siteKey, audience: audience)
+        data.topPages = pages
+        data.distinctPages = distinct
+
+        data.peopleBucketCount = window.buckets.count
+        if let first = try await firstCountedView(siteKey: siteKey), first > window.start {
+            data.peopleCountedSince = first
+            // A bucket counts once any of it lies after counting began.
+            let ends = window.buckets.dropFirst().map(\.start) + [now]
+            data.peopleBucketCount = max(1, ends.filter { $0 > first }.count)
+        }
         return data
     }
 
-    private func totals(since: Date, siteKey: String?) async throws -> (views: Int, pages: Int) {
-        var query: SQLQueryString = """
-        SELECT COALESCE(SUM(views), 0)::bigint AS views, COUNT(DISTINCT path) AS pages
-        FROM page_view_counts
-        WHERE bucket_start >= \(bind: since)
-        """
-        query += siteClause(siteKey)
-        guard let row = try await database.raw(query).first() else { return (0, 0) }
-        return (
-            (try? row.decode(column: "views", as: Int.self)) ?? 0,
-            (try? row.decode(column: "pages", as: Int.self)) ?? 0
-        )
-    }
+    // MARK: - Series
 
-    private func series(window: BotDateRange.Window, siteKey: String?) async throws -> [(bucket: Date, count: Int)] {
-        let thresholds = window.runs.map(\.start)
+    private func peopleSeries(window: BotDateRange.Window, siteKey: String?) async throws -> [Int] {
         var query: SQLQueryString = """
-        SELECT
-            width_bucket(bucket_start, \(bind: thresholds)::timestamptz[]) AS run,
-            SUM(views)::bigint AS views
+        SELECT width_bucket(bucket_start, \(bind: window.runs.map(\.start))::timestamptz[]) AS run,
+               SUM(views)::bigint AS n
         FROM page_view_counts
         WHERE bucket_start >= \(bind: window.start)
         """
         query += siteClause(siteKey)
         query += " GROUP BY 1"
+        return try await bucketed(query, window: window)
+    }
 
+    private func agentSeries(window: BotDateRange.Window, siteKey: String?) async throws -> [Int] {
+        var query: SQLQueryString = """
+        SELECT width_bucket(created_at, \(bind: window.runs.map(\.start))::timestamptz[]) AS run,
+               COUNT(*) AS n
+        FROM ai_bot_visits
+        WHERE created_at >= \(bind: window.start) AND \(unsafeRaw: Self.agentReadFilter)
+        """
+        query += siteClause(siteKey)
+        query += " GROUP BY 1"
+        return try await bucketed(query, window: window)
+    }
+
+    /// One count per bucket, driven by the bucket list so quiet periods show
+    /// as gaps rather than vanishing.
+    private func bucketed(_ query: SQLQueryString, window: BotDateRange.Window) async throws -> [Int] {
         var counts = Array(repeating: 0, count: window.buckets.count)
         for row in try await database.raw(query).all() {
             guard let run = try? row.decode(column: "run", as: Int.self),
                   (1...window.runs.count).contains(run),
-                  let views = try? row.decode(column: "views", as: Int.self)
+                  let n = try? row.decode(column: "n", as: Int.self)
             else { continue }
-            counts[window.runs[run - 1].bucket] += views
+            counts[window.runs[run - 1].bucket] += n
         }
-        // Driven by the bucket list, so quiet periods show as gaps.
-        return zip(window.buckets, counts).map { ($0.start, $1) }
+        return counts
     }
 
-    private func topPages(since: Date, siteKey: String?) async throws -> [(path: String, views: Int)] {
-        var query: SQLQueryString = """
-        SELECT path, SUM(views)::bigint AS views
-        FROM page_view_counts
-        WHERE bucket_start >= \(bind: since)
-        """
-        query += siteClause(siteKey)
-        query += " GROUP BY path ORDER BY views DESC, path LIMIT \(unsafeRaw: String(Self.topPageLimit))"
+    // MARK: - Pages
 
-        return try await database.raw(query).all().compactMap { row in
-            guard let path = try? row.decode(column: "path", as: String.self),
-                  let views = try? row.decode(column: "views", as: Int.self)
-            else { return nil }
-            return (path, views)
-        }
-    }
-
-    /// The window's AI agent total, and the per-path counts for `paths`.
-    private func agentVisits(
+    /// The most-read paths for `audience`, each with both counts, and how many
+    /// distinct paths the audience read at all.
+    private func topPages(
         since: Date,
         siteKey: String?,
-        paths: [String]
-    ) async throws -> (total: Int, byPath: [String: Int]) {
-        var totalQuery: SQLQueryString = """
-        SELECT COUNT(*) AS total FROM ai_bot_visits
-        WHERE created_at >= \(bind: since) AND agent_name IS NOT NULL
-        """
-        totalQuery += siteClause(siteKey)
-        let total = try await database.raw(totalQuery).first()?.decode(column: "total", as: Int.self) ?? 0
-        guard !paths.isEmpty else { return (total, [:]) }
-
-        var pathQuery: SQLQueryString = """
-        SELECT path, COUNT(*) AS n FROM ai_bot_visits
-        WHERE created_at >= \(bind: since) AND agent_name IS NOT NULL AND path = ANY(\(bind: paths)::text[])
-        """
-        pathQuery += siteClause(siteKey)
-        pathQuery += " GROUP BY path"
-        var byPath: [String: Int] = [:]
-        for row in try await database.raw(pathQuery).all() {
-            guard let path = try? row.decode(column: "path", as: String.self),
-                  let count = try? row.decode(column: "n", as: Int.self)
-            else { continue }
-            byPath[path] = count
+        audience: PageViewAudience
+    ) async throws -> (pages: [PageViewData.PageRow], distinct: Int) {
+        let metric: String
+        switch audience {
+        case .people: metric = "people"
+        case .agents: metric = "agents"
+        case .combined: metric = "people + agents"
         }
-        return (total, byPath)
+        var query: SQLQueryString = """
+        WITH per_path AS (
+            SELECT path, SUM(people)::bigint AS people, SUM(agents)::bigint AS agents
+            FROM (
+                SELECT path, SUM(views) AS people, 0 AS agents
+                FROM page_view_counts
+                WHERE bucket_start >= \(bind: since)
+        """
+        query += siteClause(siteKey)
+        query += """
+
+                GROUP BY path
+                UNION ALL
+                SELECT path, 0, COUNT(*)
+                FROM ai_bot_visits
+                WHERE created_at >= \(bind: since) AND \(unsafeRaw: Self.agentReadFilter)
+        """
+        query += siteClause(siteKey)
+        query += """
+
+                GROUP BY path
+            ) AS both_sources
+            GROUP BY path
+        )
+        SELECT path, people, agents, COUNT(*) OVER () AS distinct_pages
+        FROM per_path
+        WHERE \(unsafeRaw: metric) > 0
+        ORDER BY \(unsafeRaw: metric) DESC, path
+        LIMIT \(unsafeRaw: String(Self.topPageLimit))
+        """
+
+        var distinct = 0
+        let rows: [PageViewData.PageRow] = try await database.raw(query).all().compactMap { row in
+            guard let path = try? row.decode(column: "path", as: String.self) else { return nil }
+            distinct = (try? row.decode(column: "distinct_pages", as: Int.self)) ?? distinct
+            return .init(
+                path: path,
+                people: (try? row.decode(column: "people", as: Int.self)) ?? 0,
+                agents: (try? row.decode(column: "agents", as: Int.self)) ?? 0
+            )
+        }
+        return (rows, distinct)
+    }
+
+    /// When page views were first counted for this site (or any site).
+    private func firstCountedView(siteKey: String?) async throws -> Date? {
+        var query: SQLQueryString = "SELECT MIN(bucket_start) AS first FROM page_view_counts WHERE TRUE"
+        query += siteClause(siteKey)
+        return try await database.raw(query).first()?.decode(column: "first", as: Date?.self)
     }
 
     /// Empty for the all-sites view.

@@ -63,8 +63,8 @@ enum BotCharts {
     }
 
     /// The column chart both of the above draw: segments stacked bottom-up in
-    /// the order given.
-    private static func columns(
+    /// the order given. Adjacent segments should use adjacent palette slots.
+    static func columns(
         _ stacks: [(bucket: Date, segments: [ColumnSegment])],
         range: BotDateRange,
         timeZone: TimeZone,

@@ -220,8 +220,10 @@ list: a link followed from API docs is not an assistant referral.
 
 Off by default. Turned on, every successful HTML page served to a browser adds
 one to a counter for its site, path and quarter-hour, and the dashboard gains a
-**Page views** tab at `/admin/ai-bots/pages/`: total views, pages read, a chart,
-and the most-viewed pages with each page's AI agent requests beside it.
+**Page views** tab at `/admin/ai-bots/pages/`: total reads, pages read, a chart,
+and the most-read pages. A filter switches between **People**, **AI agents**
+(successful page requests only; robots.txt, sitemaps and errors stay on the AI
+agents tab) and **Combined**, which stacks the two.
 
 ```swift
 var config = BotKitConfiguration()

@@ -89,11 +89,19 @@ final class PageViewIntegrationTests: PostgresIntegrationTestCase {
         let cookie = try await signIn()
         let (status, body) = try await dashboard("pages/?range=7d", cookie: cookie)
         XCTAssertEqual(status, .ok)
-        XCTAssertTrue(body.contains("Most-viewed pages"))
+        XCTAssertTrue(body.contains("Most-read pages"))
         XCTAssertTrue(body.contains(">45<"), "total views tile")
         XCTAssertTrue(body.contains("/pricing/"))
         XCTAssertTrue(body.contains("10 AI agent"))
         XCTAssertTrue(body.contains("1 for every 4.5 page views"))
+
+        // AI agents only, and both combined.
+        let (_, agentsOnly) = try await dashboard("pages/?range=7d&audience=agents", cookie: cookie)
+        XCTAssertTrue(agentsOnly.contains(">10<"), "AI agent reads tile")
+        XCTAssertTrue(agentsOnly.contains("40 people"))
+        let (_, combined) = try await dashboard("pages/?range=7d&audience=all", cookie: cookie)
+        XCTAssertTrue(combined.contains(">55<"), "people plus agents")
+        XCTAssertTrue(combined.contains("40 people \u{00B7} 10 AI"))
 
         // And the agents tab links to it.
         let (_, agents) = try await dashboard("?range=7d", cookie: cookie)
@@ -117,9 +125,38 @@ final class PageViewIntegrationTests: PostgresIntegrationTestCase {
         let now = Date(timeIntervalSince1970: 1_790_300_000) // 25 Sep, 07:03 in Kolkata
         let data = try await PageViewQueries(database: sql(), timeZone: zone).load(range: .week, siteKey: nil, now: now)
         let labels = data.series.map { BotDateRange.week.axisLabel(for: $0.bucket, in: zone) }
-        let byDay = Dictionary(uniqueKeysWithValues: zip(labels, data.series.map(\.count)))
+        let byDay = Dictionary(uniqueKeysWithValues: zip(labels, data.series.map(\.people)))
         XCTAssertEqual(byDay["24 Sep"], 1)
         XCTAssertEqual(byDay["25 Sep"], 3)
-        XCTAssertEqual(data.totalViews, 4)
+        XCTAssertEqual(data.people, 4)
+    }
+
+    /// AI agent reads are page reads only: robots.txt, sitemaps, errors and
+    /// POSTs stay on the AI agents tab. Pages rank by the chosen audience.
+    func testAgentReadsAndRankingPerAudience() async throws {
+        let counter = try await install()
+        let now = Date()
+        for _ in 0..<5 { counter.record(siteKey: "default", path: "/human-favourite/", at: now) }
+        counter.record(siteKey: "default", path: "/bot-favourite/", at: now)
+        await counter.flush()
+        try await insertBotRows(at: Array(repeating: now, count: 8), path: "/bot-favourite/")
+        try await insertBotRows(at: Array(repeating: now, count: 3), path: "/robots.txt")
+        try await insertBotRows(at: Array(repeating: now, count: 2), path: "/sitemap.xml")
+        try await sql().raw("UPDATE ai_bot_visits SET status_code = 404 WHERE ctid IN (SELECT ctid FROM ai_bot_visits WHERE path = '/bot-favourite/' LIMIT 2)").run()
+
+        let queries = PageViewQueries(database: sql(), timeZone: TimeZone(identifier: "UTC")!)
+        let people = try await queries.load(range: .week, siteKey: nil, audience: .people, now: now.addingTimeInterval(60))
+        XCTAssertEqual(people.people, 6)
+        XCTAssertEqual(people.agents, 6, "8 fetches minus 2 errors; robots.txt and the sitemap do not count")
+        XCTAssertEqual(people.topPages.map(\.path), ["/human-favourite/", "/bot-favourite/"])
+        XCTAssertEqual(people.distinctPages, 2)
+
+        let agents = try await queries.load(range: .week, siteKey: nil, audience: .agents, now: now.addingTimeInterval(60))
+        XCTAssertEqual(agents.topPages, [.init(path: "/bot-favourite/", people: 1, agents: 6)])
+        XCTAssertEqual(agents.distinctPages, 1)
+
+        let combined = try await queries.load(range: .week, siteKey: nil, audience: .combined, now: now.addingTimeInterval(60))
+        XCTAssertEqual(combined.topPages.first, .init(path: "/bot-favourite/", people: 1, agents: 6))
+        XCTAssertEqual(combined.series.reduce(0) { $0 + $1.people + $1.agents }, 12)
     }
 }

@@ -109,7 +109,8 @@ enum DashboardPage {
         range: BotDateRange,
         ranges: [BotDateRange],
         sites: [BotDashboardSite],
-        selectedSite: BotDashboardSite?
+        selectedSite: BotDashboardSite?,
+        audience: PageViewAudience? = nil
     ) -> some HTML {
         div(.class("filters")) {
             if showsTabs {
@@ -118,12 +119,27 @@ enum DashboardPage {
             // A switcher with only "All sites" in it would be noise: a
             // single-site app gets the range pills alone.
             if sites.count > 1 {
-                siteSwitcher(base: base, section: section, range: range, sites: sites, selectedSite: selectedSite)
+                siteSwitcher(base: base, section: section, range: range, sites: sites,
+                             selectedSite: selectedSite, audience: audience)
+            }
+            if let audience {
+                nav(.class("pills"), .custom(name: "aria-label", value: "Whose reads")) {
+                    for option in PageViewAudience.allCases {
+                        let href = dashboardURL(base: base, section: section, siteKey: selectedSite?.key ?? "all",
+                                                range: range, audience: option)
+                        if option == audience {
+                            a(.href(href), .class("pill on"), .custom(name: "aria-current", value: "true")) { option.label }
+                        } else {
+                            a(.href(href), .class("pill")) { option.label }
+                        }
+                    }
+                }
             }
             div(.class("pills")) {
                 for option in ranges {
                     a(
-                        .href(dashboardURL(base: base, section: section, siteKey: selectedSite?.key ?? "all", range: option)),
+                        .href(dashboardURL(base: base, section: section, siteKey: selectedSite?.key ?? "all",
+                                           range: option, audience: audience)),
                         .class(option == range ? "pill on" : "pill")
                     ) { option.shortLabel }
                 }
@@ -160,7 +176,8 @@ enum DashboardPage {
         section: DashboardSection,
         range: BotDateRange,
         sites: [BotDashboardSite],
-        selectedSite: BotDashboardSite?
+        selectedSite: BotDashboardSite?,
+        audience: PageViewAudience?
     ) -> some HTML {
         details(.class("switcher")) {
             summary(.custom(name: "aria-label", value: "Site: \(selectedSite?.name ?? "All sites")")) {
@@ -169,9 +186,11 @@ enum DashboardPage {
                 span(.class("chev"), .custom(name: "aria-hidden", value: "true")) { "\u{25BE}" }
             }
             div(.class("menu")) {
-                switcherLink(nil, base: base, section: section, sites: sites, range: range, isCurrent: selectedSite == nil)
+                switcherLink(nil, base: base, section: section, sites: sites, range: range, audience: audience,
+                             isCurrent: selectedSite == nil)
                 ForEach(sites) { site in
-                    switcherLink(site, base: base, section: section, sites: sites, range: range, isCurrent: site == selectedSite)
+                    switcherLink(site, base: base, section: section, sites: sites, range: range, audience: audience,
+                                 isCurrent: site == selectedSite)
                 }
             }
         }
@@ -184,9 +203,10 @@ enum DashboardPage {
         section: DashboardSection,
         sites: [BotDashboardSite],
         range: BotDateRange,
+        audience: PageViewAudience?,
         isCurrent: Bool
     ) -> some HTML {
-        let href = dashboardURL(base: base, section: section, siteKey: site?.key ?? "all", range: range)
+        let href = dashboardURL(base: base, section: section, siteKey: site?.key ?? "all", range: range, audience: audience)
         if isCurrent {
             a(.href(href), .class("on"), .custom(name: "aria-current", value: "page")) {
                 siteMark(site, sites: sites)
@@ -216,9 +236,21 @@ enum DashboardPage {
         }
     }
 
-    static func dashboardURL(base: String, section: DashboardSection, siteKey: String, range: BotDateRange) -> String {
+    /// `audience` is kept only on the page views tab, and only when it is not
+    /// the default, so the common links stay short.
+    static func dashboardURL(
+        base: String,
+        section: DashboardSection,
+        siteKey: String,
+        range: BotDateRange,
+        audience: PageViewAudience? = nil
+    ) -> String {
         let key = siteKey.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? siteKey
-        return "\(base)\(section.pathSuffix)?site=\(key)&range=\(range.rawValue)"
+        var url = "\(base)\(section.pathSuffix)?site=\(key)&range=\(range.rawValue)"
+        if section == .pageViews, let audience, audience != .people {
+            url += "&audience=\(audience.rawValue)"
+        }
+        return url
     }
 
     // MARK: - Tiles

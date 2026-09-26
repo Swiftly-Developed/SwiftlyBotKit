@@ -83,8 +83,9 @@ struct BotDashboardController: RouteCollection {
         }
         guard let sql = database(req) else { return unavailable(req) }
         let (range, site) = filters(req)
+        let audience = PageViewAudience(query: req.query[String.self, at: "audience"])
         let data = try await PageViewQueries(database: sql, timeZone: options.timeZone.foundationTimeZone)
-            .load(range: range, siteKey: site?.key)
+            .load(range: range, siteKey: site?.key, audience: audience)
 
         return html(PageViewsPage.render(
             data: data,
@@ -92,7 +93,8 @@ struct BotDashboardController: RouteCollection {
             sites: config.sites,
             selectedSite: site,
             generatedAt: Date(),
-            options: options
+            options: options,
+            audience: audience
         ))
     }
 

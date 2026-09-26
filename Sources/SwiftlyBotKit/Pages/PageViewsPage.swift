@@ -5,9 +5,17 @@ import Elementary
 /// ``BotKitConfiguration/PageViews`` is on.
 ///
 /// Same chrome as ``DashboardPage`` (header, tabs, site switcher, range
-/// pills) and the same rules: no script, nothing loaded from elsewhere, every
-/// stored string escaped.
+/// pills) plus an audience filter: people, AI agents, or both. The same rules
+/// apply: no script, nothing loaded from elsewhere, every stored string
+/// escaped.
+///
+/// People are drawn in the first palette slot and AI agents in the second;
+/// in the combined view they stack in that order, which keeps touching
+/// segments on adjacent slots as the palette requires.
 enum PageViewsPage {
+
+    static let peopleColor = "var(--series-1)"
+    static let agentsColor = "var(--series-2)"
 
     static func render(
         data: PageViewData,
@@ -15,7 +23,8 @@ enum PageViewsPage {
         sites: [BotDashboardSite],
         selectedSite: BotDashboardSite?,
         generatedAt: Date,
-        options: BotKitConfiguration.Dashboard = .default
+        options: BotKitConfiguration.Dashboard = .default,
+        audience: PageViewAudience = .people
     ) -> String {
         let siteName: String? = sites.count > 1 ? (selectedSite?.name ?? "All sites") : nil
         let base = options.basePath
@@ -35,44 +44,74 @@ enum PageViewsPage {
                     DashboardPage.header(title: options.title, base: base, range: range, siteName: siteName,
                                          generatedAt: generatedAt, timeZone: timeZone)
                     DashboardPage.filters(base: base, section: .pageViews, showsTabs: true, range: range,
-                                          ranges: options.offeredDateRanges, sites: sites, selectedSite: selectedSite)
-                    if data.isEmpty {
-                        emptyState(range: range)
+                                          ranges: options.offeredDateRanges, sites: sites, selectedSite: selectedSite,
+                                          audience: audience)
+                    if data.total(for: audience) == 0 {
+                        emptyState(range: range, audience: audience)
                     } else {
-                        tiles(data, range: range)
-                        chartCard(data, range: range, timeZone: timeZone)
-                        pagesCard(data.topPages)
+                        tiles(data, range: range, audience: audience)
+                        chartCard(data, range: range, timeZone: timeZone, audience: audience)
+                        pagesCard(data.topPages, audience: audience)
                     }
-                    footnote()
+                    footnote(audience: audience)
                 }
             }
         }
         return "<!DOCTYPE html>" + page.render()
     }
 
-    private static func tiles(_ data: PageViewData, range: BotDateRange) -> some HTML {
-        div(.class("tiles")) {
+    // MARK: - Tiles
+
+    private static func tiles(_ data: PageViewData, range: BotDateRange, audience: PageViewAudience) -> some HTML {
+        let total = data.total(for: audience)
+        // People were only counted from `peopleCountedSince`; averaging them
+        // over the whole window would read as a slump that never happened.
+        let buckets = audience == .people ? data.peopleBucketCount : range.bucketCount
+        return div(.class("tiles")) {
             DashboardPage.tile(
-                label: "Page views",
-                value: BotCharts.compact(data.totalViews),
-                note: "by people, \(range.label.lowercased())",
+                label: heroLabel(audience),
+                value: BotCharts.compact(total),
+                note: heroNote(audience, range: range),
                 isHero: true
             )
             DashboardPage.tile(
                 label: "Pages read",
                 value: BotCharts.compact(data.distinctPages),
-                note: "distinct paths with a view"
+                note: "distinct paths with a read"
             )
             DashboardPage.tile(
                 label: range.isHourly ? "Per hour" : "Per day",
-                value: average(views: data.totalViews, buckets: range.bucketCount),
-                note: "average over the window"
+                value: average(views: total, buckets: buckets),
+                note: audience == .people && data.peopleCountedSince != nil
+                    ? "average since counting began" : "average over the window"
             )
-            DashboardPage.tile(
-                label: "AI agent visits",
-                value: BotCharts.compact(data.agentVisits),
-                note: agentRatio(views: data.totalViews, agents: data.agentVisits)
-            )
+            switch audience {
+            case .people:
+                DashboardPage.tile(label: "AI agent reads", value: BotCharts.compact(data.agents),
+                                   note: agentRatio(views: data.people, agents: data.agents))
+            case .agents:
+                DashboardPage.tile(label: "Page views by people", value: BotCharts.compact(data.people),
+                                   note: peopleRatio(agents: data.agents, people: data.people))
+            case .combined:
+                DashboardPage.tile(label: "Read by people", value: share(data.people, of: total),
+                                   note: "\(BotCharts.grouped(data.people)) people, \(BotCharts.grouped(data.agents)) AI agent")
+            }
+        }
+    }
+
+    private static func heroLabel(_ audience: PageViewAudience) -> String {
+        switch audience {
+        case .people: return "Page views"
+        case .agents: return "AI agent reads"
+        case .combined: return "Page reads"
+        }
+    }
+
+    private static func heroNote(_ audience: PageViewAudience, range: BotDateRange) -> String {
+        switch audience {
+        case .people: return "by people, \(range.label.lowercased())"
+        case .agents: return "pages AI agents fetched, \(range.label.lowercased())"
+        case .combined: return "people and AI agents, \(range.label.lowercased())"
         }
     }
 
@@ -89,7 +128,28 @@ enum PageViewsPage {
         return "1 for every \(oneDecimal(ratio)) page views"
     }
 
-    /// Views per bucket. One decimal below ten, so a quiet site reads "0.4"
+    /// The same comparison seen from the AI agent side.
+    static func peopleRatio(agents: Int, people: Int) -> String {
+        guard people > 0 else { return "none in this window" }
+        guard agents > 0 else { return "and no AI agent reads" }
+        if people >= agents {
+            let ratio = Double(people) / Double(agents)
+            return ratio < 1.05 ? "about one per AI agent read" : "\(oneDecimal(ratio)) per AI agent read"
+        }
+        let ratio = Double(agents) / Double(people)
+        return "1 for every \(oneDecimal(ratio)) AI agent reads"
+    }
+
+    /// "5%", never "0%" or "100%" while the other side has any reads.
+    static func share(_ part: Int, of total: Int) -> String {
+        guard total > 0 else { return "\u{2013}" }
+        let percent = Double(part) / Double(total) * 100
+        if part > 0, percent < 1 { return "<1%" }
+        if part < total, percent > 99 { return ">99%" }
+        return "\(Int(percent.rounded()))%"
+    }
+
+    /// Reads per bucket. One decimal below ten, so a quiet site reads "0.4"
     /// rather than a flat "0".
     static func average(views: Int, buckets: Int) -> String {
         let value = Double(views) / Double(max(buckets, 1))
@@ -101,54 +161,129 @@ enum PageViewsPage {
         return rounded == rounded.rounded() ? String(Int(rounded)) : String(format: "%.1f", rounded)
     }
 
-    private static func chartCard(_ data: PageViewData, range: BotDateRange, timeZone: TimeZone) -> some HTML {
+    // MARK: - Chart
+
+    private static func chartCard(
+        _ data: PageViewData,
+        range: BotDateRange,
+        timeZone: TimeZone,
+        audience: PageViewAudience
+    ) -> some HTML {
         div(.class("card")) {
-            h2 { "Page views over time" }
+            h2 { "\(heroLabel(audience)) over time" }
             p(.class("hint")) {
-                "\(range.isHourly ? "Hourly" : "Daily") buckets, \(timeZone.identifier)."
+                "\(range.isHourly ? "Hourly" : "Daily") buckets, \(timeZone.identifier).\(countingNote(data, audience: audience, timeZone: timeZone))"
             }
             div(.class("chart")) {
-                HTMLRaw(BotCharts.singleColumns(
-                    series: data.series, range: range, timeZone: timeZone,
-                    label: "Page views", color: "var(--series-1)"
+                HTMLRaw(BotCharts.columns(
+                    data.series.map { point in
+                        var segments: [BotCharts.ColumnSegment] = []
+                        if audience.includesPeople {
+                            segments.append(.init(label: "People", color: peopleColor, count: point.people))
+                        }
+                        if audience.includesAgents {
+                            segments.append(.init(label: "AI agents", color: agentsColor, count: point.agents))
+                        }
+                        return (point.bucket, segments)
+                    },
+                    range: range,
+                    timeZone: timeZone,
+                    ariaLabel: "\(heroLabel(audience)) per \(range.isHourly ? "hour" : "day")"
                 ))
             }
-        }
-    }
-
-    private static func pagesCard(_ pages: [PageViewData.PageRow]) -> some HTML {
-        div(.class("card")) {
-            h2 { "Most-viewed pages" }
-            p(.class("hint")) {
-                "What people read, with the AI agent requests for the same page beside it."
-            }
-            HTMLRaw(BotCharts.barRows(pages.map { page in
-                .init(
-                    name: page.path,
-                    meta: nil,
-                    value: page.views,
-                    note: page.agentVisits > 0 ? "\(BotCharts.grouped(page.agentVisits)) AI agent" : nil,
-                    color: "var(--series-1)",
-                    flag: nil
-                )
-            }))
-        }
-    }
-
-    private static func emptyState(range: BotDateRange) -> some HTML {
-        div(.class("card")) {
-            div(.class("empty")) {
-                p { "No page views in the \(range.label.lowercased())." }
-                p(.class("hint")) {
-                    "Counting starts when page views are enabled and deployed. Counts are written every few seconds."
+            if audience == .combined {
+                div(.class("legend")) {
+                    legendEntry("People", color: peopleColor, count: data.people)
+                    legendEntry("AI agents", color: agentsColor, count: data.agents)
                 }
             }
         }
     }
 
-    private static func footnote() -> some HTML {
+    private static func legendEntry(_ name: String, color: String, count: Int) -> some HTML {
+        div {
+            i(.custom(name: "style", value: "background:\(color)")) {}
+            span { name }
+            b { BotCharts.grouped(count) }
+        }
+    }
+
+    /// " People are counted from 26 Sep 11:00." when that falls in the window.
+    private static func countingNote(_ data: PageViewData, audience: PageViewAudience, timeZone: TimeZone) -> String {
+        guard audience.includesPeople, let since = data.peopleCountedSince else { return "" }
+        return " People are counted from \(DashboardPage.timestamp(since, timeZone: timeZone)); there is no page view data before that."
+    }
+
+    // MARK: - Pages
+
+    private static func pagesCard(_ pages: [PageViewData.PageRow], audience: PageViewAudience) -> some HTML {
+        div(.class("card")) {
+            h2 { "Most-read pages" }
+            p(.class("hint")) {
+                switch audience {
+                case .people: "What people read, with the AI agent reads of the same page beside it."
+                case .agents: "What AI agents fetched, with the page views by people beside it."
+                case .combined: "Every read of each page, split into people and AI agents."
+                }
+            }
+            HTMLRaw(BotCharts.barRows(pages.map { row(for: $0, audience: audience) }))
+            if audience == .combined {
+                div(.class("legend")) {
+                    div {
+                        i(.custom(name: "style", value: "background:\(peopleColor)")) {}
+                        span { "People" }
+                    }
+                    div {
+                        i(.custom(name: "style", value: "background:\(agentsColor)")) {}
+                        span { "AI agents" }
+                    }
+                }
+            }
+        }
+    }
+
+    static func row(for page: PageViewData.PageRow, audience: PageViewAudience) -> BotCharts.BarRow {
+        switch audience {
+        case .people:
+            return .init(name: page.path, meta: nil, value: page.people,
+                         note: page.agents > 0 ? "\(BotCharts.grouped(page.agents)) AI agent" : nil,
+                         color: peopleColor, flag: nil)
+        case .agents:
+            return .init(name: page.path, meta: nil, value: page.agents,
+                         note: page.people > 0 ? "\(BotCharts.grouped(page.people)) people" : nil,
+                         color: agentsColor, flag: nil)
+        case .combined:
+            // People are drawn at the baseline, inside the bar, in their own colour.
+            return .init(name: page.path, meta: nil, value: page.people + page.agents,
+                         note: "\(BotCharts.grouped(page.people)) people \u{00B7} \(BotCharts.grouped(page.agents)) AI",
+                         color: agentsColor, flag: nil,
+                         highlight: page.people, highlightColor: peopleColor)
+        }
+    }
+
+    // MARK: - Empty state and footnote
+
+    private static func emptyState(range: BotDateRange, audience: PageViewAudience) -> some HTML {
+        div(.class("card")) {
+            div(.class("empty")) {
+                switch audience {
+                case .people:
+                    p { "No page views in the \(range.label.lowercased())." }
+                    p(.class("hint")) {
+                        "Counting starts when page views are enabled and deployed. Counts are written every few seconds."
+                    }
+                case .agents:
+                    p { "No AI agent read a page in the \(range.label.lowercased())." }
+                case .combined:
+                    p { "No page reads by people or AI agents in the \(range.label.lowercased())." }
+                }
+            }
+        }
+    }
+
+    private static func footnote(audience: PageViewAudience) -> some HTML {
         p(.class("sub")) {
-            "Counted without cookies and without storing anything about the visitor: no IP address, no user agent, no referrer. Each view adds one to a counter for its page and quarter-hour. Only successful HTML pages opened in a browser count; AI agents, other bots, HTMX swaps and prefetches do not. These are views, not visitors: one person reading two pages is two views."
+            "People: counted without cookies and without storing anything about the visitor (no IP address, no user agent, no referrer); each view adds one to a counter for its page and quarter-hour, and only successful HTML pages opened in a browser count. These are views, not visitors. AI agents: successful page requests by agents in the catalog; robots.txt, sitemaps and errors are on the AI agents tab. Other bots appear in neither."
         }
     }
 }

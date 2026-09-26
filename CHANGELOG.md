@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `BotKit.configure(for:database:pageViews:)` registers the page view table
   when `pageViews` is `true`; `install(on:config:)` does so from the
   configuration.
+- An audience filter on the "Page views" tab: People, AI agents (successful
+  page requests only) or Combined, which stacks both in the chart and in each
+  page's bar. When counting began inside the window, the chart says so and
+  the people average covers only the time since.
 - A logo above the dashboard's sign-in form, the SwiftlyBotKit logo by
   default (embedded, nothing to host), and configurable sign-in colours:
   `dashboard.signInPage` (`SignInPage`, `SignInLogo`, `SignInColors`), with

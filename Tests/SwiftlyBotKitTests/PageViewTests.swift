@@ -253,17 +253,22 @@ final class PageViewRenderingTests: XCTestCase {
         BotDashboardSite(key: "b", name: "Site B"),
     ]
 
-    func testRendersTotalsPagesAndEscapesPaths() {
+    private func sample() -> PageViewData {
         var data = PageViewData()
-        data.totalViews = 1_234
+        data.people = 1_234
+        data.agents = 300
         data.distinctPages = 2
-        data.agentVisits = 300
-        data.series = BotDateRange.week.buckets(now: Date(), in: .gmt).map { ($0, 10) }
+        data.series = BotDateRange.week.buckets(now: Date(), in: .gmt).map { .init(bucket: $0, people: 10, agents: 3) }
+        data.peopleBucketCount = 7
         data.topPages = [
-            .init(path: "/pricing/", views: 900, agentVisits: 12),
-            .init(path: "/<script>alert(1)</script>", views: 334, agentVisits: 0),
+            .init(path: "/pricing/", people: 900, agents: 12),
+            .init(path: "/<script>alert(1)</script>", people: 334, agents: 0),
         ]
-        let html = PageViewsPage.render(data: data, range: .week, sites: sites, selectedSite: sites[1], generatedAt: Date())
+        return data
+    }
+
+    func testRendersTotalsPagesAndEscapesPaths() {
+        let html = PageViewsPage.render(data: sample(), range: .week, sites: sites, selectedSite: sites[1], generatedAt: Date())
         XCTAssertTrue(html.contains("1,234"))
         XCTAssertTrue(html.contains("/pricing/"))
         XCTAssertTrue(html.contains("12 AI agent"))
@@ -275,6 +280,76 @@ final class PageViewRenderingTests: XCTestCase {
         // Range pills and the switcher stay on this tab.
         XCTAssertTrue(html.contains("href=\"/admin/ai-bots/pages/?site=b&amp;range=24h\""))
         XCTAssertTrue(html.contains("href=\"/admin/ai-bots/pages/?site=all&amp;range=7d\""))
+    }
+
+    /// The audience pills, and every other link on the tab keeping the choice.
+    func testAudienceFilterLinks() {
+        let people = PageViewsPage.render(data: sample(), range: .week, sites: sites, selectedSite: sites[1], generatedAt: Date())
+        XCTAssertTrue(people.contains("aria-current=\"true\">People"))
+        XCTAssertTrue(people.contains("href=\"/admin/ai-bots/pages/?site=b&amp;range=7d&amp;audience=agents\""))
+        XCTAssertTrue(people.contains("href=\"/admin/ai-bots/pages/?site=b&amp;range=7d&amp;audience=all\""))
+
+        let combined = PageViewsPage.render(data: sample(), range: .week, sites: sites, selectedSite: sites[1],
+                                            generatedAt: Date(), audience: .combined)
+        XCTAssertTrue(combined.contains("aria-current=\"true\">Combined"))
+        XCTAssertTrue(combined.contains("href=\"/admin/ai-bots/pages/?site=b&amp;range=24h&amp;audience=all\""), "range pills keep it")
+        XCTAssertTrue(combined.contains("href=\"/admin/ai-bots/pages/?site=all&amp;range=7d&amp;audience=all\""), "site switcher keeps it")
+        XCTAssertTrue(combined.contains("href=\"/admin/ai-bots/pages/?site=b&amp;range=7d\""), "People is the plain URL")
+        XCTAssertTrue(combined.contains("href=\"/admin/ai-bots/?site=b&amp;range=7d\""), "the agents tab drops it")
+        XCTAssertEqual(PageViewAudience(query: "all"), .combined)
+        XCTAssertEqual(PageViewAudience(query: "nonsense"), .people)
+        XCTAssertEqual(PageViewAudience(query: nil), .people)
+    }
+
+    func testEachAudienceShowsItsOwnNumbers() {
+        let data = sample()
+        let agents = PageViewsPage.render(data: data, range: .week, sites: [], selectedSite: nil,
+                                          generatedAt: Date(), audience: .agents)
+        XCTAssertTrue(agents.contains("AI agent reads"))
+        XCTAssertTrue(agents.contains(">300<"))
+        XCTAssertTrue(agents.contains("900 people"), "people beside each page")
+
+        let combined = PageViewsPage.render(data: data, range: .week, sites: [], selectedSite: nil,
+                                            generatedAt: Date(), audience: .combined)
+        XCTAssertTrue(combined.contains(">1,534<"), "the sum")
+        XCTAssertTrue(combined.contains("900 people \u{00B7} 12 AI"))
+        XCTAssertTrue(combined.contains(">80%<"), "share read by people")
+        // Two marks per populated column, and a legend naming both.
+        XCTAssertEqual(combined.components(separatedBy: "\u{00B7} People: 10</title>").count - 1, 7)
+        XCTAssertEqual(combined.components(separatedBy: "\u{00B7} AI agents: 3</title>").count - 1, 7)
+    }
+
+    func testCombinedBarDrawsPeopleInsideTheTotal() {
+        let row = PageViewsPage.row(for: .init(path: "/", people: 61, agents: 38), audience: .combined)
+        XCTAssertEqual(row.value, 99)
+        XCTAssertEqual(row.highlight, 61)
+        XCTAssertEqual(row.color, PageViewsPage.agentsColor)
+        XCTAssertEqual(row.highlightColor, PageViewsPage.peopleColor)
+    }
+
+    /// Counting began inside the window: the average only spans the buckets
+    /// since, and the chart says so.
+    func testPartialWindowIsLabelled() {
+        var data = sample()
+        data.people = 109
+        data.peopleBucketCount = 1
+        data.peopleCountedSince = Date(timeIntervalSince1970: 1_790_330_400)
+        let html = PageViewsPage.render(data: data, range: .week, sites: [], selectedSite: nil, generatedAt: Date())
+        XCTAssertTrue(html.contains(">109<"))
+        XCTAssertTrue(html.contains("average since counting began"))
+        XCTAssertTrue(html.contains("People are counted from"))
+        let agents = PageViewsPage.render(data: data, range: .week, sites: [], selectedSite: nil,
+                                          generatedAt: Date(), audience: .agents)
+        XCTAssertFalse(agents.contains("People are counted from"), "irrelevant to the agents view")
+    }
+
+    func testShare() {
+        XCTAssertEqual(PageViewsPage.share(80, of: 100), "80%")
+        XCTAssertEqual(PageViewsPage.share(1, of: 1_000), "<1%")
+        XCTAssertEqual(PageViewsPage.share(999, of: 1_000), ">99%")
+        XCTAssertEqual(PageViewsPage.share(0, of: 10), "0%")
+        XCTAssertEqual(PageViewsPage.share(0, of: 0), "\u{2013}")
+        XCTAssertEqual(PageViewsPage.peopleRatio(agents: 400, people: 100), "1 for every 4 AI agent reads")
     }
 
     func testEmptyWindow() {
