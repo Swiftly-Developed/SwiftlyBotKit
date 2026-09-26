@@ -24,6 +24,7 @@ The options are grouped into nested structs, each with a `default` you can start
 | ``BotKitConfiguration/verification`` | ``BotKitConfiguration/Verification`` | IP range checks |
 | ``BotKitConfiguration/clientIP`` | ``ClientIPStrategy`` | Where the client IP comes from |
 | ``BotKitConfiguration/dashboard`` | ``BotKitConfiguration/Dashboard`` | The dashboard |
+| ``BotKitConfiguration/pageViews`` | ``BotKitConfiguration/PageViews`` | Anonymous page view counts, off by default. See <doc:PageViews> |
 | ``BotKitConfiguration/database`` | `DatabaseID?` | Which registered database holds the table (default: the app's default database) |
 
 ``BotKitConfiguration`` is a plain `Sendable` value. Build it however you like: with the memberwise initializer, or by starting from `BotKitConfiguration()` and assigning properties.

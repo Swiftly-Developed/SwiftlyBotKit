@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Optional anonymous page views (`BotKitConfiguration.pageViews`, off by
+  default). Each successful HTML page served to a browser adds one to a
+  counter for its site, path and quarter-hour in a new `page_view_counts`
+  table; no cookie, IP address, IP hash, user agent or referrer is stored.
+  Counts are summed in memory and written every ten seconds and at shutdown.
+  The dashboard gains a "Page views" tab at `<path>/pages/`, with the AI
+  agent requests for each page beside its views.
+- `BotKit.configure(for:database:pageViews:)` registers the page view table
+  when `pageViews` is `true`; `install(on:config:)` does so from the
+  configuration.
+- `BotKitConfigurationError.pageViewsNotMigrated`, thrown when page views are
+  enabled but their table was not registered.
+
 ### Fixed
 
 - The tutorials page is now published at `tutorials/meetswiftlybotkit`, the

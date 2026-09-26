@@ -48,6 +48,9 @@ breakdown is what this package records and shows.
   database write happens in a detached task.
 - Never records ordinary human traffic or static assets. `robots.txt` and
   `sitemap.xml` are recorded on purpose.
+- Optional anonymous page views: how often people read each page, stored as
+  plain counters per page and quarter-hour, with no cookie, no IP address and
+  no user agent, on a second dashboard tab beside the AI agent numbers.
 - Stores a keyed hash of the client IP, never the address itself.
 - Multi-site aware: one app serving several domains gets one dashboard with a
   site switcher.
@@ -62,7 +65,9 @@ breakdown is what this package records and shows.
 Server-rendered HTML and inline SVG: no JavaScript, no CDN, and it follows the
 system light or dark setting. Below the headline tiles and the chart, it
 breaks traffic down by agent (with how much of it was verified), by page (with
-the user-triggered share), and by AI assistant for human referrals.
+the user-triggered share), and by AI assistant for human referrals. With
+[page views](#page-views-optional) on, a second tab shows how often people read
+each page, with the AI agent requests for the same page beside it.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/assets/breakdowns-dark.png">
@@ -146,7 +151,7 @@ export BOT_DASHBOARD_SECRET="$(openssl rand -hex 32)"
 Open `/admin/ai-bots/` and sign in. Without the two credential variables the
 dashboard is not mounted (the path answers 404) and recording continues.
 
-`BotKit.install(on:config:)` is shorthand for `BotKit.configure(for:database:)` (the
+`BotKit.install(on:config:)` is shorthand for `BotKit.configure(for:database:pageViews:)` (the
 migration) followed by `BotKit.configureRoutes(for:config:)` (the middleware
 and dashboard). Call the two separately if your app registers migrations and
 routes in different places. Calling `install` as well throws
@@ -210,6 +215,45 @@ platform name set and no agent. These are people who clicked a link in an AI
 answer. Consent-gated analytics often miss them. Developer and company sites
 (`platform.openai.com`, `docs.claude.com`, `x.ai`) are deliberately not on the
 list: a link followed from API docs is not an assistant referral.
+
+## Page views (optional)
+
+Off by default. Turned on, every successful HTML page served to a browser adds
+one to a counter for its site, path and quarter-hour, and the dashboard gains a
+**Page views** tab at `/admin/ai-bots/pages/`: total views, pages read, a chart,
+and the most-viewed pages with each page's AI agent requests beside it.
+
+```swift
+var config = BotKitConfiguration()
+config.pageViews.isEnabled = true
+try BotKit.install(on: app, config: config)
+```
+
+If you call `BotKit.configure(for:)` and `configureRoutes(for:config:)`
+separately, pass `pageViews: true` to `configure` too, so the table is created;
+`configureRoutes` throws `BotKitConfigurationError.pageViewsNotMigrated` if you
+forget.
+
+The table, `page_view_counts`, has four columns: `site_key`, `path`,
+`bucket_start` and `views`. Nothing about the visitor is stored anywhere: no
+cookie, no IP address or hash, no user agent, no referrer, no per-visit
+timestamp. Views are summed in memory and only the sums are written, every ten
+seconds and at shutdown. So these are **views, not visitors**. Quarter-hours,
+not hours, because every time zone's offset is a whole number of quarter-hours,
+so a view always lands on the right local day.
+
+A view counts when the request is a `GET` answered `2xx` with an HTML body,
+from a user agent that starts `Mozilla/`, is not in the AI agent catalog and
+does not call itself a bot, crawler, headless browser, monitor, link preview or
+HTTP library. HTMX swaps, prefetches and prerenders, subresource fetches
+(`Sec-Fetch-Dest` other than `document`), recording's excluded paths and the
+dashboard are skipped.
+
+| Option | Default | Purpose |
+|---|---|---|
+| `isEnabled` | `false` | Count page views and show the tab. |
+| `flushInterval` | 10 seconds | How often the in-memory counts are written, in one statement. A killed process loses at most this much. |
+| `maximumPendingCounters` | `10_000` | Distinct site, path and quarter-hour counters held between writes. Beyond it new ones are dropped with a sampled warning. |
 
 ## Configuration
 

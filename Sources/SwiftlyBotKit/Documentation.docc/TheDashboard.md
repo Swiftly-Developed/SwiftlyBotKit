@@ -24,6 +24,8 @@ It is mounted on every host the app answers for, so a multi-site app has one das
 
 Tracking starts when the middleware is deployed. There is no backfill.
 
+With ``BotKitConfiguration/PageViews`` on, a **Page views** tab sits beside this one at `<path>/pages/`, behind the same sign-in and with the same filters. See <doc:PageViews>.
+
 ### Filters
 
 The URL carries two query parameters:

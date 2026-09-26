@@ -50,7 +50,7 @@ try await app.autoMigrate()
 
 ``BotKit/install(on:config:)`` does two things, which you can also call separately:
 
-- ``BotKit/configure(for:database:)`` registers the migration. It must run before `app.autoMigrate()` or `swift run App migrate`.
+- ``BotKit/configure(for:database:pageViews:)`` registers the migration. It must run before `app.autoMigrate()` or `swift run App migrate`.
 - ``BotKit/configureRoutes(for:config:)`` installs the tracking middleware and, when credentials resolve, the dashboard routes. Call it after adding `FileMiddleware`, so the status code it records is the one the client received.
 
 Call either `install` or the two separately, not both: a second setup throws ``BotKitConfigurationError/alreadyInstalled(_:)`` at boot.

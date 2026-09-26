@@ -62,6 +62,7 @@ enum DashboardTheme {
     .pills{display:flex;gap:4px;background:var(--surface-1);border:1px solid var(--border);border-radius:9px;padding:3px}
     .pill{padding:5px 11px;border-radius:6px;font-size:13px;font-weight:600;text-decoration:none;color:var(--text-secondary)}
     .pill.on{background:var(--text-primary);color:var(--surface-1)}
+    .pill:focus-visible{outline:2px solid var(--series-1);outline-offset:2px}
     select,.btn{font:inherit;font-size:13px;font-weight:600;padding:7px 11px;border-radius:8px;
       border:1px solid var(--border);background:var(--surface-1);color:var(--text-primary);cursor:pointer}
     .spacer{flex:1}

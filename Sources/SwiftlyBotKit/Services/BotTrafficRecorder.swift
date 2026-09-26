@@ -52,6 +52,14 @@ struct BotRequestClassifier: Sendable {
     /// Cheap, synchronous, and runs on every single request, so it does the
     /// least work that can rule a request out, and never touches the database.
     func isWorthRecording(path: String, userAgent: String?, referer: String?) -> Bool {
+        guard !isExcluded(path: path) else { return false }
+        return agent(userAgent: userAgent) != nil || referrerPlatform(referer: referer) != nil
+    }
+
+    /// Whether `path` is never recorded or counted: a static asset, the
+    /// dashboard itself, or under an excluded prefix. Shared with page view
+    /// counting, so both halves skip exactly the same paths.
+    func isExcluded(path: String) -> Bool {
         let path = Self.collapsingRepeatedSlashes(path)
         // The router and FileMiddleware see the percent-decoded path, so
         // `/logo%2Epng` is an asset and `/admin%20bots/` is a dashboard at
@@ -61,18 +69,15 @@ struct BotRequestClassifier: Sendable {
             : nil
         let decodedOrRaw = decoded ?? path
         if let ext = Self.fileExtension(of: decodedOrRaw), recording.ignoredFileExtensions.contains(ext) {
-            return false
+            return true
         }
-        if isDashboardPath(path) || isDashboardPath(decodedOrRaw) { return false }
+        if isDashboardPath(path) || isDashboardPath(decodedOrRaw) { return true }
         // Documented as plain string prefixes: `/healthz` also covers
         // `/healthzcheck`. Checked against the slash-collapsed path, so
         // `//healthz` cannot slip past.
-        if recording.excludedPathPrefixes.contains(where: { prefix in
+        return recording.excludedPathPrefixes.contains { prefix in
             !prefix.isEmpty && (path.hasPrefix(prefix) || decodedOrRaw.hasPrefix(prefix))
-        }) {
-            return false
         }
-        return agent(userAgent: userAgent) != nil || referrerPlatform(referer: referer) != nil
     }
 
     /// The dashboard's own path and everything below it, on a path-segment

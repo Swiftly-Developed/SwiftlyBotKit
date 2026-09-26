@@ -6,6 +6,8 @@ import SQLKit
 /// The dashboard, behind a password. With the default path:
 ///
 /// - `GET  /admin/ai-bots/`: the dashboard, or the sign-in page
+/// - `GET  /admin/ai-bots/pages/`: the page views tab, only when
+///   ``BotKitConfiguration/PageViews`` is on
 /// - `POST /admin/ai-bots/login`
 /// - `POST /admin/ai-bots/logout`
 ///
@@ -43,6 +45,9 @@ struct BotDashboardController: RouteCollection {
         // `BotKitConfiguration.validate()` before this runs.
         let dashboard = routes.grouped(options.pathComponents.map { PathComponent.constant($0) })
         dashboard.get { try await self.index($0) }
+        if config.pageViews.isEnabled {
+            dashboard.get("pages") { try await self.pageViews($0) }
+        }
         dashboard.post("login") { try await self.login($0) }
         dashboard.post("logout") { try await self.logout($0) }
     }
@@ -53,28 +58,8 @@ struct BotDashboardController: RouteCollection {
         guard isSignedIn(req) else {
             return html(LoginPage.render(error: nil, options: options))
         }
-        // `req.db` is a fatal error when no database is registered under the
-        // ID, so check the registry first and answer 503 instead of crashing.
-        // (`Databases.configuration(for: nil)` would itself trap without a
-        // default, hence `ids()`.)
-        let registered = req.application.databases.ids()
-        let hasDatabase = config.database.map { registered.contains($0) } ?? !registered.isEmpty
-        guard hasDatabase,
-              let sql = req.db(config.database) as? SQLDatabase
-        else {
-            req.logger.error("The AI bot dashboard needs a registered PostgreSQL database.")
-            return html(
-                Self.plainPage(title: "Unavailable", message: "The dashboard needs a PostgreSQL database."),
-                status: .serviceUnavailable
-            )
-        }
-
-        let range = options.dateRange(forQuery: req.query[String.self, at: "range"])
-        let site = config.site(
-            forKey: req.query[String.self, at: "site"],
-            hostSiteKey: config.siteKey(req)
-        )
-
+        guard let sql = database(req) else { return unavailable(req) }
+        let (range, site) = filters(req)
         let data = try await BotDashboardQueries(database: sql, timeZone: options.timeZone.foundationTimeZone)
             .load(range: range, siteKey: site?.key)
 
@@ -85,8 +70,60 @@ struct BotDashboardController: RouteCollection {
             selectedSite: site,
             generatedAt: Date(),
             options: options,
-            knownAgentCount: runtime.classifier.agents.agents.count
+            knownAgentCount: runtime.classifier.agents.agents.count,
+            showsPageViews: config.pageViews.isEnabled
         ))
+    }
+
+    private func pageViews(_ req: Request) async throws -> Response {
+        guard isSignedIn(req) else {
+            return html(LoginPage.render(error: nil, options: options))
+        }
+        guard let sql = database(req) else { return unavailable(req) }
+        let (range, site) = filters(req)
+        let data = try await PageViewQueries(database: sql, timeZone: options.timeZone.foundationTimeZone)
+            .load(range: range, siteKey: site?.key)
+
+        return html(PageViewsPage.render(
+            data: data,
+            range: range,
+            sites: config.sites,
+            selectedSite: site,
+            generatedAt: Date(),
+            options: options
+        ))
+    }
+
+    /// The configured database, or `nil` when none is registered under its
+    /// ID or it cannot run SQL.
+    ///
+    /// `req.db` is a fatal error when no database is registered under the
+    /// ID, so check the registry first and answer 503 instead of crashing.
+    /// (`Databases.configuration(for: nil)` would itself trap without a
+    /// default, hence `ids()`.)
+    private func database(_ req: Request) -> (any SQLDatabase)? {
+        let registered = req.application.databases.ids()
+        let hasDatabase = config.database.map { registered.contains($0) } ?? !registered.isEmpty
+        guard hasDatabase else { return nil }
+        return req.db(config.database) as? SQLDatabase
+    }
+
+    private func unavailable(_ req: Request) -> Response {
+        req.logger.error("The AI bot dashboard needs a registered PostgreSQL database.")
+        return html(
+            Self.plainPage(title: "Unavailable", message: "The dashboard needs a PostgreSQL database."),
+            status: .serviceUnavailable
+        )
+    }
+
+    /// The `?range=` and `?site=` filters.
+    private func filters(_ req: Request) -> (BotDateRange, BotDashboardSite?) {
+        let range = options.dateRange(forQuery: req.query[String.self, at: "range"])
+        let site = config.site(
+            forKey: req.query[String.self, at: "site"],
+            hostSiteKey: config.siteKey(req)
+        )
+        return (range, site)
     }
 
     // MARK: - Session

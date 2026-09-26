@@ -19,6 +19,7 @@ swift Scripts/generate-time-zones.swift       # regenerate BotKitTimeZone from z
 
 - `Sources/SwiftlyBotKit/Configuration/`: every public option. `BotKitTimeZone.swift` is generated.
 - `Sources/SwiftlyBotKit/Catalog/AIAgentCatalogData.swift`: generated from ai-robots-txt/ai.robots.txt. Never hand-edit.
+- `Sources/SwiftlyBotKit/Services/PageViewCounter.swift`: the optional page view filter, in-memory tally and batched flush; `PageViewQueries.swift` and `Pages/PageViewsPage.swift` are its dashboard tab.
 - `Sources/SwiftlyBotKit/Documentation.docc/`: DocC articles and tutorials. The README and DocC are written against the public API, so update them when it changes.
 - `Examples/QuickStart/`: runnable example app, built in CI.
 
@@ -32,6 +33,7 @@ swift Scripts/generate-time-zones.swift       # regenerate BotKitTimeZone from z
 - **Recording never delays or alters the response.** The middleware does one synchronous catalog lookup and writes in a detached task.
 - **Time zones:** every bucket boundary is computed in Swift (`BotDateRange.window`) and sent to PostgreSQL as instants for `width_bucket`. Never hand PostgreSQL a zone name: its tz data can lack or disagree on a zone, and it reads `GMT+0100` with an inverted sign, in hours. `BotKitTimeZone` cases are the canonical `zone.tab` names; legacy names are deprecated aliases.
 - **HTML:** every database- or request-sourced string goes through `BotCharts.escape`. Charts are server-rendered SVG, no JavaScript.
+- **Page views store counters only.** `page_view_counts` is site, path, quarter-hour and a count. Never add a column, log line or in-memory field that holds anything about the visitor (IP, IP hash, user agent, referrer, cookie, per-visit time): the whole claim of the feature is that nothing identifying is kept. Request headers may be read to decide whether to count, then dropped. Buckets stay quarter-hours so every zone's day boundary falls between them.
 - **Chart colours** follow a fixed palette slot order that is part of the colourblind-safety design. Do not reorder.
 - **PostgreSQL only.** The migration creates enum types (in one transaction) and the queries use `FILTER` and `width_bucket`. The library depends on FluentSQL/SQLKit, not the driver.
 

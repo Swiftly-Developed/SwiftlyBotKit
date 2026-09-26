@@ -14,7 +14,7 @@ It also records people who arrive from an AI assistant's answer, such as a click
 
 Everything is shown on a password-protected dashboard, by default at `/admin/ai-bots/`, with a date filter and a site switcher for apps that serve several domains. The charts are server-rendered SVG and CSS, with no JavaScript.
 
-Ordinary human traffic is never recorded, and no response is ever delayed: the middleware does one catalog lookup per request and writes in a detached task only when it matches.
+Ordinary human traffic is never recorded, and no response is ever delayed: the middleware does one catalog lookup per request and writes in a detached task only when it matches. For scale, you can turn on anonymous page view counts, which add a "Page views" tab: how often people read each page, kept as plain counters with no cookie and nothing about the visitor. See <doc:PageViews>.
 
 ```swift
 import SwiftlyBotKit
@@ -71,6 +71,11 @@ SwiftlyBotKit needs PostgreSQL at runtime. The package depends on Fluent and SQL
 - ``BotVerification``
 - ``CrawlerRangeFeed``
 - ``IPRange``
+
+### Page views
+
+- <doc:PageViews>
+- ``BotKitConfiguration/PageViews``
 
 ### Dashboard
 

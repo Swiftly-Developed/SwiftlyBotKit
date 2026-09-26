@@ -33,7 +33,7 @@ Values are read once, when ``BotKit/configureRoutes(for:config:)`` runs. Changin
 
 PostgreSQL is required (13 and 16 are tested). The migration creates two enum types, `ai_agent_purpose` and `bot_verification`, the `ai_bot_visits` table, and three indexes, in one transaction: if it fails halfway, for example because the app already has a type with one of those names, nothing is left behind, and it can be rerun once the cause is fixed. The table name is fixed. The dashboard does not depend on the server's time zone data.
 
-Register the migration with ``BotKit/install(on:config:)`` or ``BotKit/configure(for:database:)`` (one or the other, once) before migrating, then migrate however your app already does: `try await app.autoMigrate()` at boot, or a release step such as `swift run App migrate --yes`.
+Register the migration with ``BotKit/install(on:config:)`` or ``BotKit/configure(for:database:pageViews:)`` (one or the other, once) before migrating, then migrate however your app already does: `try await app.autoMigrate()` at boot, or a release step such as `swift run App migrate --yes`.
 
 Recording writes to `app.db`, the app's default database. Rows are small and only AI traffic is recorded, so the table grows slowly, but it is never pruned automatically. The dashboard reads at most 90 days back. To keep the table bounded, delete older rows on a schedule:
 

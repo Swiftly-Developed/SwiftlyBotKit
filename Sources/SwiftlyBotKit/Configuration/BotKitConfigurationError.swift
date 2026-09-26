@@ -24,6 +24,11 @@ public enum BotKitConfigurationError: Error, Sendable, Equatable, CustomStringCo
     /// `CREATE TYPE` fails) or record every hit twice.
     case alreadyInstalled(String)
 
+    /// ``BotKitConfiguration/PageViews/isEnabled`` is on, but
+    /// `BotKit.configure(for:database:pageViews:)` ran without `pageViews:
+    /// true`, so the table the counts go into would never be created.
+    case pageViewsNotMigrated
+
     /// A description of what is wrong and how to fix it.
     public var description: String {
         switch self {
@@ -35,6 +40,8 @@ public enum BotKitConfigurationError: Error, Sendable, Equatable, CustomStringCo
             return "The BotKit site key \(key.debugDescription) is reserved for the dashboard's all-sites view. Give that site another key."
         case .alreadyInstalled(let detail):
             return "BotKit is already installed on this application: \(detail)"
+        case .pageViewsNotMigrated:
+            return "BotKit page views are enabled, but BotKit.configure(for:database:pageViews:) was called without pageViews: true, so their table is never created. Pass pageViews: true there, or use BotKit.install(on:config:)."
         }
     }
 }

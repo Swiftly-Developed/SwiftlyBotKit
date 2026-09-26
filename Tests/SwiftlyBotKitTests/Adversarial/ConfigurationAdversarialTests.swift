@@ -627,7 +627,7 @@ final class CfgAdvInstallationAdversarialTests: CfgAdvAppTestCase {
             guard case BotKitConfigurationError.alreadyInstalled(let detail) = error else {
                 return XCTFail("unexpected \(error)")
             }
-            XCTAssertTrue(detail.contains("configure(for:database:)"), detail)
+            XCTAssertTrue(detail.contains("configure(for:database:pageViews:)"), detail)
         }
         XCTAssertEqual(registeredMigrationCount(), 1)
         XCTAssertEqual(trackingMiddlewareCount(), 0, "a refused install must not install the middleware")

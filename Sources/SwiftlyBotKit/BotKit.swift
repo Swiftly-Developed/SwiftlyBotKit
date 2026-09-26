@@ -1,6 +1,7 @@
 import Foundation
 import Vapor
 import Fluent
+import SQLKit
 
 /// AI-agent traffic tracking for a Vapor app, plus a password-protected
 /// dashboard that reads it back.
@@ -10,9 +11,14 @@ import Fluent
 /// - **Recording.** A middleware classifies every request against
 ///   ``AIAgentCatalog``, verifies the big operators against their published IP
 ///   ranges, and writes a row per AI agent visit and per AI-assistant referral.
-///   Ordinary human traffic is never recorded, and no response is ever delayed.
+///   Ordinary human traffic is never recorded there, and no response is ever
+///   delayed.
+/// - **Page views**, when turned on (``BotKitConfiguration/pageViews``): an
+///   anonymous count of how often people read each page, kept as one counter
+///   per page and quarter-hour, with no cookie and nothing about the visitor.
 /// - **The dashboard**, by default at `/admin/ai-bots/`: charts, tiles, a date
-///   filter and, for multi-site apps, a site switcher. Mounted only when a
+///   filter and, for multi-site apps, a site switcher, plus a "Page views"
+///   tab when page views are counted. Mounted only when a
 ///   username and password are configured, so an unconfigured deploy answers
 ///   404 rather than exposing an open page.
 ///
@@ -34,24 +40,35 @@ import Fluent
 /// All behaviour is set through ``BotKitConfiguration``.
 public enum BotKit {
 
-    /// Registers the database migration. Call before `app.autoMigrate()`.
+    /// Registers the database migrations. Call before `app.autoMigrate()`.
     ///
     /// The migration creates the `ai_bot_visits` table, two PostgreSQL enum
     /// types (`ai_agent_purpose`, `bot_verification`) and three indexes, in
     /// `database` (default: the app's default database). Pass the same
     /// database as ``BotKitConfiguration/database``.
     ///
-    /// Registers the migration once per application: a second call logs an
+    /// With `pageViews` set, it also registers the `page_view_counts` table
+    /// that ``BotKitConfiguration/PageViews`` writes to. Pass `true` exactly
+    /// when `config.pageViews.isEnabled` is; ``configureRoutes(for:config:)``
+    /// throws when counting is on and its table was not registered here.
+    ///
+    /// Registers the migrations once per application: a second call logs an
     /// error and does nothing, since a duplicate would fail `autoMigrate` on
     /// its `CREATE TYPE`.
-    public static func configure(for app: Application, database: DatabaseID? = nil) {
+    public static func configure(for app: Application, database: DatabaseID? = nil, pageViews: Bool = false) {
         let registered = app.storage[InstallationKey.self]?.migrationRegistered ?? false
         guard !registered else {
             app.logger.error("BotKit.configure(for:) was called again; the migration is already registered, so this call does nothing.")
             return
         }
         app.migrations.add(CreateAIBotVisit(), to: database)
-        markInstalled(app) { $0.migrationRegistered = true }
+        if pageViews {
+            app.migrations.add(CreatePageViewCounts(), to: database)
+        }
+        markInstalled(app) {
+            $0.migrationRegistered = true
+            $0.pageViewsMigrationRegistered = pageViews
+        }
     }
 
     /// Installs the tracking middleware and, when credentials resolve, the
@@ -77,6 +94,11 @@ public enum BotKit {
             )
         }
         try config.validate()
+        if config.pageViews.isEnabled,
+           let installation = app.storage[InstallationKey.self], installation.migrationRegistered,
+           !installation.pageViewsMigrationRegistered {
+            throw BotKitConfigurationError.pageViewsNotMigrated
+        }
         var config = config
         let duplicates = config.duplicateSiteKeys
         if !duplicates.isEmpty {
@@ -113,6 +135,28 @@ public enum BotKit {
             ))
         }
 
+        if config.pageViews.isEnabled {
+            let databaseID = config.database
+            let counter = PageViewCounter(
+                database: { [weak app] in
+                    // `app.db` traps for an unregistered ID; check first.
+                    guard let app else { return nil }
+                    let registered = app.databases.ids()
+                    guard databaseID.map({ registered.contains($0) }) ?? !registered.isEmpty else { return nil }
+                    return app.db(databaseID) as? SQLDatabase
+                },
+                configuration: config.pageViews,
+                logger: app.logger
+            )
+            app.middleware.use(PageViewCountingMiddleware(
+                filter: PageViewFilter(classifier: runtime.classifier),
+                counter: counter,
+                siteKey: config.siteKey
+            ))
+            app.lifecycle.use(PageViewLifecycle(counter: counter))
+            app.storage[PageViewCounterKey.self] = counter
+        }
+
         guard config.dashboard.isEnabled else { return }
         if !config.dashboard.timeZone.isAvailable {
             app.logger.warning(
@@ -137,13 +181,13 @@ public enum BotKit {
         ))
     }
 
-    /// ``configure(for:database:)`` and ``configureRoutes(for:config:)`` in one call.
+    /// ``configure(for:database:pageViews:)`` and ``configureRoutes(for:config:)`` in one call.
     ///
     /// Call after adding `FileMiddleware` and before `app.autoMigrate()`. Do
-    /// not also call ``configure(for:database:)``.
+    /// not also call ``configure(for:database:pageViews:)``.
     ///
     /// - Throws: ``BotKitConfigurationError/alreadyInstalled(_:)`` when
-    ///   ``configure(for:database:)``, ``configureRoutes(for:config:)`` or
+    ///   ``configure(for:database:pageViews:)``, ``configureRoutes(for:config:)`` or
     ///   `install` already ran on this application, and any other
     ///   ``BotKitConfigurationError`` ``configureRoutes(for:config:)`` throws.
     ///   Nothing is registered when it throws.
@@ -153,7 +197,7 @@ public enum BotKit {
     ) throws {
         if app.storage[InstallationKey.self]?.migrationRegistered == true {
             throw BotKitConfigurationError.alreadyInstalled(
-                "the migration is already registered, by configure(for:database:) or an earlier install(on:config:). install(on:config:) already calls configure(for:database:); call one or the other."
+                "the migration is already registered, by configure(for:database:pageViews:) or an earlier install(on:config:). install(on:config:) already calls configure(for:database:pageViews:); call one or the other."
             )
         }
         if app.storage[InstallationKey.self]?.routesConfigured == true {
@@ -164,18 +208,24 @@ public enum BotKit {
         // Validate before registering anything, so a bad configuration
         // leaves the application untouched.
         try config.validate()
-        configure(for: app, database: config.database)
+        configure(for: app, database: config.database, pageViews: config.pageViews.isEnabled)
         try configureRoutes(for: app, config: config)
     }
 
     /// What has been installed on one application.
     struct Installation: Sendable {
         var migrationRegistered = false
+        var pageViewsMigrationRegistered = false
         var routesConfigured = false
     }
 
     struct InstallationKey: StorageKey {
         typealias Value = Installation
+    }
+
+    /// The application's page view counter, when page views are on.
+    struct PageViewCounterKey: StorageKey {
+        typealias Value = PageViewCounter
     }
 
     private static func markInstalled(_ app: Application, _ update: (inout Installation) -> Void) {

@@ -10,7 +10,7 @@ import Fluent
 /// `BOT_DASHBOARD_PASSWORD` are set in the environment.
 ///
 /// The options are grouped into small nested structs (`recording`,
-/// `detection`, `verification`, `dashboard`) plus the client IP strategy, each
+/// `detection`, `verification`, `dashboard`, `pageViews`) plus the client IP strategy, each
 /// with a `default` value you can copy and adjust:
 ///
 /// ```swift
@@ -78,6 +78,9 @@ public struct BotKitConfiguration: Sendable {
     /// The password-protected dashboard.
     public var dashboard: Dashboard
 
+    /// Anonymous page view counting for human visitors. Off by default.
+    public var pageViews: PageViews
+
     /// Which of the app's databases the table lives in, recording writes to
     /// and the dashboard reads from. Default `nil`: the app's default
     /// database, so the table sits beside the app's own tables and no
@@ -97,6 +100,7 @@ public struct BotKitConfiguration: Sendable {
         verification: Verification = .default,
         clientIP: ClientIPStrategy = .lastForwardedFor,
         dashboard: Dashboard = .default,
+        pageViews: PageViews = .default,
         database: DatabaseID? = nil
     ) {
         self.siteKey = siteKey
@@ -107,6 +111,7 @@ public struct BotKitConfiguration: Sendable {
         self.verification = verification
         self.clientIP = clientIP
         self.dashboard = dashboard
+        self.pageViews = pageViews
         self.database = database
     }
 
@@ -277,6 +282,63 @@ extension BotKitConfiguration {
             self.isEnabled = isEnabled
             self.feeds = feeds
             self.refreshInterval = refreshInterval
+        }
+    }
+}
+
+// MARK: - Page views
+
+extension BotKitConfiguration {
+
+    /// Anonymous page view counts for human visitors, shown on the dashboard's
+    /// "Page views" tab.
+    ///
+    /// Nothing about a visitor is stored. There is no cookie, no IP address or
+    /// IP hash, no user agent and no referrer, and no timestamp per visit. Each
+    /// counted view adds one to a counter for its site, path and quarter-hour,
+    /// and that counter is all that reaches the database. It answers "how often
+    /// was this page read", not "who read it" or "how many people".
+    ///
+    /// A view is counted when the request is a `GET` answered `2xx` or `304`
+    /// with an HTML body, from a browser: no AI agent from the catalog, nothing
+    /// that names itself a bot, crawler or HTTP library, no HTMX swap, no
+    /// prefetch, and when the browser says what it is fetching
+    /// (`Sec-Fetch-Dest`), a top-level document. The dashboard path and
+    /// ``BotKitConfiguration/Recording/excludedPathPrefixes`` are skipped.
+    ///
+    /// Off by default, and it needs its own table: pass `pageViews: true` to
+    /// `BotKit.configure(for:database:pageViews:)`, or use
+    /// `BotKit.install(on:config:)`, which reads this setting.
+    public struct PageViews: Sendable, Equatable {
+
+        /// Counting off.
+        public static let `default` = PageViews()
+
+        /// Count page views and offer the "Page views" tab. Default `false`.
+        public var isEnabled: Bool
+
+        /// How often the counts gathered in memory are written, in one
+        /// statement. They are also written when the app shuts down; a process
+        /// that is killed loses at most this much. Values below one second
+        /// count as one second. Default ten seconds.
+        public var flushInterval: TimeInterval
+
+        /// The most distinct site, path and quarter-hour counters held in
+        /// memory between writes. Beyond it further views are dropped and a
+        /// warning is logged, so an app that answers `200` for any path cannot
+        /// be made to grow memory without bound. Values below 1 count as 1.
+        /// Default `10_000`.
+        public var maximumPendingCounters: Int
+
+        /// Creates a page view configuration.
+        public init(
+            isEnabled: Bool = false,
+            flushInterval: TimeInterval = 10,
+            maximumPendingCounters: Int = 10_000
+        ) {
+            self.isEnabled = isEnabled
+            self.flushInterval = flushInterval
+            self.maximumPendingCounters = maximumPendingCounters
         }
     }
 }

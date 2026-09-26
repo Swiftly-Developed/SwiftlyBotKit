@@ -12,7 +12,14 @@ import Foundation
 /// Linux.
 enum BotCharts {
 
-    // MARK: - Stacked columns over time
+    // MARK: - Columns over time
+
+    /// One coloured part of a column.
+    struct ColumnSegment {
+        let label: String
+        let color: String
+        let count: Int
+    }
 
     /// One column per bucket, stacked by purpose, drawn bottom-up in
     /// `AIAgentPurpose.displayOrder` so touching segments are always adjacent
@@ -22,19 +29,60 @@ enum BotCharts {
         range: BotDateRange,
         timeZone: TimeZone
     ) -> String {
+        columns(
+            series.map { point in
+                (point.bucket, AIAgentPurpose.displayOrder.compactMap { purpose -> ColumnSegment? in
+                    let count = point.counts[purpose] ?? 0
+                    return count > 0
+                        ? ColumnSegment(label: purpose.label, color: DashboardTheme.seriesColor(for: purpose), count: count)
+                        : nil
+                })
+            },
+            range: range,
+            timeZone: timeZone,
+            ariaLabel: "AI agent visits per \(range.isHourly ? "hour" : "day"), stacked by purpose"
+        )
+    }
+
+    /// One single-colour column per bucket, for a series with one measure.
+    static func singleColumns(
+        series: [(bucket: Date, count: Int)],
+        range: BotDateRange,
+        timeZone: TimeZone,
+        label: String,
+        color: String
+    ) -> String {
+        columns(
+            series.map { point in
+                (point.bucket, point.count > 0 ? [ColumnSegment(label: label, color: color, count: point.count)] : [])
+            },
+            range: range,
+            timeZone: timeZone,
+            ariaLabel: "\(label) per \(range.isHourly ? "hour" : "day")"
+        )
+    }
+
+    /// The column chart both of the above draw: segments stacked bottom-up in
+    /// the order given.
+    private static func columns(
+        _ stacks: [(bucket: Date, segments: [ColumnSegment])],
+        range: BotDateRange,
+        timeZone: TimeZone,
+        ariaLabel: String
+    ) -> String {
         let width = 760.0, height = 232.0
         let left = 44.0, right = 10.0, top = 14.0, bottom = 26.0
         let plotWidth = width - left - right
         let plotHeight = height - top - bottom
         let baseline = top + plotHeight
 
-        let peak = series.map(\.total).max() ?? 0
+        let peak = stacks.map { $0.segments.reduce(0) { $0 + $1.count } }.max() ?? 0
         let scaleMax = niceMax(peak)
-        let band = series.isEmpty ? plotWidth : plotWidth / Double(series.count)
+        let band = stacks.isEmpty ? plotWidth : plotWidth / Double(stacks.count)
         // Capped at 24px; the band's leftover is deliberately left as air.
         let barWidth = min(24.0, max(3.0, band - 6.0))
 
-        var svg = "<svg viewBox=\"0 0 \(fmt(width)) \(fmt(height))\" role=\"img\" aria-label=\"AI agent visits per \(range.isHourly ? "hour" : "day"), stacked by purpose\">"
+        var svg = "<svg viewBox=\"0 0 \(fmt(width)) \(fmt(height))\" role=\"img\" aria-label=\"\(escape(ariaLabel))\">"
 
         // Gridlines and y ticks: hairline, solid, recessive.
         for step in 0...4 {
@@ -46,38 +94,33 @@ enum BotCharts {
         }
 
         // Columns.
-        let labelStep = max(1, Int((Double(series.count) / 8.0).rounded(.up)))
-        for (index, point) in series.enumerated() {
+        let labelStep = max(1, Int((Double(stacks.count) / 8.0).rounded(.up)))
+        for (index, stack) in stacks.enumerated() {
             let x = left + band * Double(index) + (band - barWidth) / 2
-
-            let segments = AIAgentPurpose.displayOrder.compactMap { purpose -> (AIAgentPurpose, Int)? in
-                let count = point.counts[purpose] ?? 0
-                return count > 0 ? (purpose, count) : nil
-            }
+            let segments = stack.segments.filter { $0.count > 0 }
             var cursor = baseline
             for (position, segment) in segments.enumerated() {
-                let full = Double(segment.1) / Double(scaleMax) * plotHeight
+                let full = Double(segment.count) / Double(scaleMax) * plotHeight
                 let isTop = position == segments.count - 1
                 // 2px of surface between touching segments. The topmost segment
                 // keeps its full height; the gap always sits below the next one.
                 let drawn = max(1.5, isTop ? full : full - 2)
                 let y = cursor - full
-                let fill = DashboardTheme.seriesColor(for: segment.0)
-                let title = "<title>\(escape(range.axisLabel(for: point.bucket, in: timeZone))) · \(escape(segment.0.label)): \(grouped(segment.1))</title>"
+                let title = "<title>\(escape(range.axisLabel(for: stack.bucket, in: timeZone))) · \(escape(segment.label)): \(grouped(segment.count))</title>"
                 if isTop {
                     let radius = min(4.0, drawn, barWidth / 2)
-                    svg += "<path d=\"\(roundedTopPath(x: x, y: y, width: barWidth, height: drawn, radius: radius))\" fill=\"\(fill)\">\(title)</path>"
+                    svg += "<path d=\"\(roundedTopPath(x: x, y: y, width: barWidth, height: drawn, radius: radius))\" fill=\"\(segment.color)\">\(title)</path>"
                 } else {
-                    svg += "<rect x=\"\(fmt(x))\" y=\"\(fmt(y + (full - drawn)))\" width=\"\(fmt(barWidth))\" height=\"\(fmt(drawn))\" fill=\"\(fill)\">\(title)</rect>"
+                    svg += "<rect x=\"\(fmt(x))\" y=\"\(fmt(y + (full - drawn)))\" width=\"\(fmt(barWidth))\" height=\"\(fmt(drawn))\" fill=\"\(segment.color)\">\(title)</rect>"
                 }
                 cursor = y
             }
 
             // Counted back from the newest bucket, so the latest one is always
             // labelled and no label is ever squeezed in beside another.
-            if (series.count - 1 - index) % labelStep == 0 {
+            if (stacks.count - 1 - index) % labelStep == 0 {
                 let centre = x + barWidth / 2
-                svg += "<text class=\"axis\" x=\"\(fmt(centre))\" y=\"\(fmt(baseline + 16))\" text-anchor=\"middle\">\(escape(range.axisLabel(for: point.bucket, in: timeZone)))</text>"
+                svg += "<text class=\"axis\" x=\"\(fmt(centre))\" y=\"\(fmt(baseline + 16))\" text-anchor=\"middle\">\(escape(range.axisLabel(for: stack.bucket, in: timeZone)))</text>"
             }
         }
 

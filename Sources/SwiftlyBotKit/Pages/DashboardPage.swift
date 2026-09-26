@@ -1,6 +1,29 @@
 import Foundation
 import Elementary
 
+/// Which tab of the dashboard a page is.
+enum DashboardSection: Sendable, CaseIterable {
+    /// AI agents and AI referrals, at the dashboard path itself.
+    case agents
+    /// Anonymous page view counts, at `<path>/pages/`.
+    case pageViews
+
+    /// Appended to the dashboard's base path.
+    var pathSuffix: String {
+        switch self {
+        case .agents: return "/"
+        case .pageViews: return "/pages/"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .agents: return "AI agents"
+        case .pageViews: return "Page views"
+        }
+    }
+}
+
 /// The dashboard page, at `BotKitConfiguration.Dashboard.path`.
 ///
 /// Self-contained on purpose: no Tailwind CDN, no shared site layout, no
@@ -16,7 +39,8 @@ enum DashboardPage {
         selectedSite: BotDashboardSite?,
         generatedAt: Date,
         options: BotKitConfiguration.Dashboard = .default,
-        knownAgentCount: Int = AIAgentCatalog.all.count
+        knownAgentCount: Int = AIAgentCatalog.all.count,
+        showsPageViews: Bool = false
     ) -> String {
         // A single-site app has nothing to switch between, so it names no site.
         let siteName: String? = sites.count > 1 ? (selectedSite?.name ?? "All sites") : nil
@@ -33,8 +57,8 @@ enum DashboardPage {
                 main {
                     header(title: options.title, base: base, range: range, siteName: siteName,
                            generatedAt: generatedAt, timeZone: options.timeZone.foundationTimeZone)
-                    filters(base: base, range: range, ranges: options.offeredDateRanges,
-                            sites: sites, selectedSite: selectedSite)
+                    filters(base: base, section: .agents, showsTabs: showsPageViews, range: range,
+                            ranges: options.offeredDateRanges, sites: sites, selectedSite: selectedSite)
                     if data.isEmpty {
                         emptyState(range: range)
                     } else {
@@ -55,7 +79,7 @@ enum DashboardPage {
 
     // MARK: - Header and filters
 
-    private static func header(
+    static func header(
         title: String,
         base: String,
         range: BotDateRange,
@@ -78,25 +102,49 @@ enum DashboardPage {
         }
     }
 
-    private static func filters(
+    static func filters(
         base: String,
+        section: DashboardSection,
+        showsTabs: Bool,
         range: BotDateRange,
         ranges: [BotDateRange],
         sites: [BotDashboardSite],
         selectedSite: BotDashboardSite?
     ) -> some HTML {
         div(.class("filters")) {
+            if showsTabs {
+                tabs(base: base, section: section, range: range, selectedSite: selectedSite)
+            }
             // A switcher with only "All sites" in it would be noise: a
             // single-site app gets the range pills alone.
             if sites.count > 1 {
-                siteSwitcher(base: base, range: range, sites: sites, selectedSite: selectedSite)
+                siteSwitcher(base: base, section: section, range: range, sites: sites, selectedSite: selectedSite)
             }
             div(.class("pills")) {
                 for option in ranges {
                     a(
-                        .href(dashboardURL(base: base, siteKey: selectedSite?.key ?? "all", range: option)),
+                        .href(dashboardURL(base: base, section: section, siteKey: selectedSite?.key ?? "all", range: option)),
                         .class(option == range ? "pill on" : "pill")
                     ) { option.shortLabel }
+                }
+            }
+        }
+    }
+
+    /// Links between the dashboard's tabs, keeping the site and range.
+    private static func tabs(
+        base: String,
+        section: DashboardSection,
+        range: BotDateRange,
+        selectedSite: BotDashboardSite?
+    ) -> some HTML {
+        nav(.class("pills tabs"), .custom(name: "aria-label", value: "Dashboard sections")) {
+            for option in DashboardSection.allCases {
+                let href = dashboardURL(base: base, section: option, siteKey: selectedSite?.key ?? "all", range: range)
+                if option == section {
+                    a(.href(href), .class("pill on"), .custom(name: "aria-current", value: "page")) { option.label }
+                } else {
+                    a(.href(href), .class("pill")) { option.label }
                 }
             }
         }
@@ -109,6 +157,7 @@ enum DashboardPage {
     /// "All sites" is not undone by the host default.
     private static func siteSwitcher(
         base: String,
+        section: DashboardSection,
         range: BotDateRange,
         sites: [BotDashboardSite],
         selectedSite: BotDashboardSite?
@@ -120,9 +169,9 @@ enum DashboardPage {
                 span(.class("chev"), .custom(name: "aria-hidden", value: "true")) { "\u{25BE}" }
             }
             div(.class("menu")) {
-                switcherLink(nil, base: base, sites: sites, range: range, isCurrent: selectedSite == nil)
+                switcherLink(nil, base: base, section: section, sites: sites, range: range, isCurrent: selectedSite == nil)
                 ForEach(sites) { site in
-                    switcherLink(site, base: base, sites: sites, range: range, isCurrent: site == selectedSite)
+                    switcherLink(site, base: base, section: section, sites: sites, range: range, isCurrent: site == selectedSite)
                 }
             }
         }
@@ -132,11 +181,12 @@ enum DashboardPage {
     private static func switcherLink(
         _ site: BotDashboardSite?,
         base: String,
+        section: DashboardSection,
         sites: [BotDashboardSite],
         range: BotDateRange,
         isCurrent: Bool
     ) -> some HTML {
-        let href = dashboardURL(base: base, siteKey: site?.key ?? "all", range: range)
+        let href = dashboardURL(base: base, section: section, siteKey: site?.key ?? "all", range: range)
         if isCurrent {
             a(.href(href), .class("on"), .custom(name: "aria-current", value: "page")) {
                 siteMark(site, sites: sites)
@@ -166,9 +216,9 @@ enum DashboardPage {
         }
     }
 
-    private static func dashboardURL(base: String, siteKey: String, range: BotDateRange) -> String {
+    static func dashboardURL(base: String, section: DashboardSection, siteKey: String, range: BotDateRange) -> String {
         let key = siteKey.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? siteKey
-        return "\(base)/?site=\(key)&range=\(range.rawValue)"
+        return "\(base)\(section.pathSuffix)?site=\(key)&range=\(range.rawValue)"
     }
 
     // MARK: - Tiles
@@ -205,7 +255,7 @@ enum DashboardPage {
         }
     }
 
-    private static func tile(
+    static func tile(
         label: String,
         value: String,
         note: String,
@@ -348,7 +398,7 @@ enum DashboardPage {
         return "\(Int(scaled.rounded()))%"
     }
 
-    private static func timestamp(_ date: Date, timeZone: TimeZone) -> String {
+    static func timestamp(_ date: Date, timeZone: TimeZone) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = timeZone
