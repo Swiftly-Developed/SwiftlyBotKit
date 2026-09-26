@@ -9,27 +9,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Optional anonymous page views (`BotKitConfiguration.pageViews`, off by
-  default). Each successful HTML page served to a browser adds one to a
-  counter for its site, path and quarter-hour in a new `page_view_counts`
-  table; no cookie, IP address, IP hash, user agent or referrer is stored.
-  Counts are summed in memory and written every ten seconds and at shutdown.
-  The dashboard gains a "Page views" tab at `<path>/pages/`, with the AI
-  agent requests for each page beside its views.
-- `BotKit.configure(for:database:pageViews:)` registers the page view table
-  when `pageViews` is `true`; `install(on:config:)` does so from the
-  configuration.
+- A sign-in logo per site: `dashboard.signInPage.siteLogos`, keyed by what
+  `siteKey` returns, replaces `logo` on the site the sign-in page is opened
+  on. The alt text defaults to that site's name. With `sites` configured, a
+  key that is not one of them throws `unknownSignInLogoSite` at install.
+- A dark-mode logo: `SignInLogo.image(url:altText:darkURL:)` shows `darkURL`
+  when the visitor's system is dark. Every absolute logo URL, per site and
+  dark, has its origin added to `img-src`.
+
+### Changed
+
+- The dashboard, page views and export are drawn in the time zone of the
+  browser viewing them, not the configured one: charts, buckets, the
+  "generated" time and custom export dates. A few lines of inline script
+  store the browser's IANA zone in a `<sessionCookieName>_tz` cookie scoped
+  to the dashboard path. Without script, or for a zone the host does not
+  know, `dashboard.timeZone` is used as before, and the caption names the
+  zone actually used.
+- **The `Content-Security-Policy` now has a `script-src`** allowing that one
+  script by its SHA-256 hash, and nothing else.
+- **Breaking:** `SignInLogo.image` has a third associated value, `darkURL`.
+  Building one is unchanged; a `switch` that binds `.image(let url, let alt)`
+  needs a third binding, such as `.image(let url, let alt, _)`.
+
+## [0.6.0] - 2026-09-26
+
+### Added
+
+- An "Export" tab at `<path>/export/` that downloads the recorded data as
+  CSV. Choose the period (24 hours, 7, 30 or 90 days, or custom dates as
+  whole local days), the level of detail (raw rows, per day, per ISO week,
+  per month, or totals), what to include (AI agents, AI referrals, people)
+  and the breakdown (site, page, agent and operator, purpose, verification,
+  referring assistant). Every line carries an `audience` column. IP hashes
+  and user agents are never exported, values a spreadsheet would run as a
+  formula are escaped, and raw exports are streamed. No configuration: it is
+  there whenever the dashboard is.
+
+### Changed
+
+- The dashboard's tabs are always shown, since Export exists even with page
+  views off.
+
+## [0.5.0] - 2026-09-26
+
+### Added
+
+- Hover (or tap) popovers on the dashboard's charts. Over-time columns show
+  the bucket's day or hour, each segment with its count and share, and a
+  total; bar rows show the details behind the bar (people and AI agents per
+  page, user-triggered against crawled, verified and spoofed per agent).
+  CSS only, since the dashboard's content security policy allows no script.
+
+## [0.4.0] - 2026-09-26
+
+### Added
+
 - An audience filter on the "Page views" tab: People, AI agents (successful
   page requests only) or Combined, which stacks both in the chart and in each
   page's bar. When counting began inside the window, the chart says so and
   the people average covers only the time since.
+
+## [0.3.0] - 2026-09-26
+
+### Added
+
 - A logo above the dashboard's sign-in form, the SwiftlyBotKit logo by
   default (embedded, nothing to host), and configurable sign-in colours:
   `dashboard.signInPage` (`SignInPage`, `SignInLogo`, `SignInColors`), with
   optional separate dark-mode colours. Unsafe colours or logo URLs throw
   `invalidSignInColor` / `invalidSignInLogo` at install.
-- `BotKitConfigurationError.pageViewsNotMigrated`, thrown when page views are
-  enabled but their table was not registered.
+
+## [0.2.1] - 2026-09-26
 
 ### Fixed
 
@@ -40,6 +91,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when present, now decides on its own (only `same-origin` and `none` pass,
   so `same-site` is now refused too), and the policy is `same-origin`, which
   still sends no referrer to other sites.
+
+## [0.2.0] - 2026-09-26
+
+### Added
+
+- Optional anonymous page views (`BotKitConfiguration.pageViews`, off by
+  default). Each successful HTML page served to a browser adds one to a
+  counter for its site, path and quarter-hour in a new `page_view_counts`
+  table; no cookie, IP address, IP hash, user agent or referrer is stored.
+  Counts are summed in memory and written every ten seconds and at shutdown.
+  The dashboard gains a "Page views" tab at `<path>/pages/`, with the AI
+  agent requests for each page beside its views.
+- `BotKit.configure(for:database:pageViews:)` registers the page view table
+  when `pageViews` is `true`; `install(on:config:)` does so from the
+  configuration.
+- `BotKitConfigurationError.pageViewsNotMigrated`, thrown when page views are
+  enabled but their table was not registered.
+
+## [0.1.2] - 2026-09-25
+
+### Fixed
 
 - The tutorials page is now published at `tutorials/meetswiftlybotkit`, the
   address the README links to. DocC names the page after its file, which was
@@ -226,6 +298,13 @@ Initial public release.
   agents.
 - `Scripts/generate-ai-agent-catalog.py` to regenerate the catalog.
 
-[Unreleased]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.1.1...HEAD
+[Unreleased]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.6.0...HEAD
+[0.6.0]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.5.0...0.6.0
+[0.5.0]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.4.0...0.5.0
+[0.4.0]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.3.0...0.4.0
+[0.3.0]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.2.1...0.3.0
+[0.2.1]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.2.0...0.2.1
+[0.2.0]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.1.2...0.2.0
+[0.1.2]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.1.1...0.1.2
 [0.1.1]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.1.0...0.1.1
 [0.1.0]: https://github.com/Swiftly-Developed/SwiftlyBotKit/releases/tag/0.1.0

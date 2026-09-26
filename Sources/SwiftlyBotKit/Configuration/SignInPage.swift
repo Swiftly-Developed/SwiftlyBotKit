@@ -10,6 +10,17 @@ extension BotKitConfiguration {
     /// config.dashboard.signInPage.colors = .init(background: "#0B1020", button: "#6366F1")
     /// ```
     ///
+    /// The dashboard is mounted on every host the app answers for, so a
+    /// multi-site app can give each site its own logo, picked by the key
+    /// ``BotKitConfiguration/siteKey`` returns for the sign-in request:
+    ///
+    /// ```swift
+    /// config.dashboard.signInPage.siteLogos = [
+    ///     "shop": .image(url: "/images/shop.png", darkURL: "/images/shop-dark.png"),
+    ///     "docs": .image(url: "/images/docs.svg"),
+    /// ]
+    /// ```
+    ///
     /// Colours and the logo URL are written into the page, so they are checked
     /// when BotKit is installed, and an unusable one makes
     /// `BotKit.configureRoutes(for:config:)` throw rather than render.
@@ -18,8 +29,15 @@ extension BotKitConfiguration {
         /// The SwiftlyBotKit logo, the dashboard's own colours.
         public static let `default` = SignInPage()
 
-        /// The logo above the form. Default ``SignInLogo/swiftlyBotKit``.
+        /// The logo above the form, on any site without an entry in
+        /// ``siteLogos``. Default ``SignInLogo/swiftlyBotKit``.
         public var logo: SignInLogo
+
+        /// A logo per site, keyed by what ``BotKitConfiguration/siteKey``
+        /// returns for the request, used in place of ``logo`` on that site.
+        /// With ``BotKitConfiguration/sites`` configured, every key must be
+        /// one of theirs. Default: none.
+        public var siteLogos: [String: SignInLogo]
 
         /// Colours for the page. Every one left `nil` keeps the dashboard's
         /// own. Applied in light and dark mode alike, unless ``darkColors``
@@ -33,10 +51,12 @@ extension BotKitConfiguration {
         /// Creates a sign-in page configuration.
         public init(
             logo: SignInLogo = .swiftlyBotKit,
+            siteLogos: [String: SignInLogo] = [:],
             colors: SignInColors = .init(),
             darkColors: SignInColors? = nil
         ) {
             self.logo = logo
+            self.siteLogos = siteLogos
             self.colors = colors
             self.darkColors = darkColors
         }
@@ -52,8 +72,10 @@ public enum SignInLogo: Sendable, Equatable {
     /// `/images/logo.png`), an absolute `https` or `http` URL, or a
     /// `data:image/` URL. An absolute URL's origin is added to the page's
     /// `Content-Security-Policy`. Shown at most 64 points tall. `altText`
-    /// defaults to the dashboard title.
-    case image(url: String, altText: String? = nil)
+    /// defaults to the site's ``BotDashboardSite/name``, or the dashboard
+    /// title. `darkURL`, in the same forms, replaces `url` when the
+    /// visitor's system is in dark mode.
+    case image(url: String, altText: String? = nil, darkURL: String? = nil)
     /// No logo.
     case none
 }
@@ -140,9 +162,22 @@ extension BotKitConfiguration.SignInPage {
                 }
             }
         }
-        if case .image(let url, _) = logo {
-            guard Self.logoURLIsUsable(url) else { throw BotKitConfigurationError.invalidSignInLogo(url) }
+        for logo in allLogos {
+            guard case .image(let url, _, let darkURL) = logo else { continue }
+            for url in [url] + (darkURL.map { [$0] } ?? []) where !Self.logoURLIsUsable(url) {
+                throw BotKitConfigurationError.invalidSignInLogo(url)
+            }
         }
+    }
+
+    /// The logo for a sign-in on the site with this key.
+    func logo(forSite key: String?) -> SignInLogo {
+        key.flatMap { siteLogos[$0] } ?? logo
+    }
+
+    /// ``logo`` and every site's, sites in key order.
+    private var allLogos: [SignInLogo] {
+        [logo] + siteLogos.sorted { $0.key < $1.key }.map(\.value)
     }
 
     /// A root-relative path, an absolute http(s) URL, or a `data:image/` URL,
@@ -160,9 +195,11 @@ extension BotKitConfiguration.SignInPage {
         return true
     }
 
-    /// The logo's origin when it is an absolute URL, for `img-src`.
-    var logoOrigin: String? {
-        guard case .image(let url, _) = logo, !url.hasPrefix("/"), !url.hasPrefix("data:") else { return nil }
-        return url
+    /// Every logo URL that is absolute, light and dark, for `img-src`.
+    var absoluteLogoURLs: [String] {
+        allLogos.flatMap { logo -> [String] in
+            guard case .image(let url, _, let darkURL) = logo else { return [] }
+            return ([url] + (darkURL.map { [$0] } ?? [])).filter { !$0.hasPrefix("/") && !$0.hasPrefix("data:") }
+        }
     }
 }

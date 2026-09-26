@@ -617,7 +617,8 @@ extension BotKitConfiguration {
 
         /// The time zone every hourly and daily bucket boundary is drawn in,
         /// on both the Swift and the SQL side of the query, for example
-        /// `.americaNewYork` or `.europeParis`. Default ``BotKitTimeZone/utc``.
+        /// `.americaNewYork` or `.europeParis`, when the viewer's browser does
+        /// not report its own. Default ``BotKitTimeZone/utc``.
         public var timeZone: BotKitTimeZone
 
         /// The date ranges offered as filter pills, in display order. Default

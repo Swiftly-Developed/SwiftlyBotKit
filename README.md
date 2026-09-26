@@ -54,10 +54,10 @@ breakdown is what this package records and shows.
 - Stores a keyed hash of the client IP, never the address itself.
 - Multi-site aware: one app serving several domains gets one dashboard with a
   site switcher.
-- Server-rendered dashboard with no JavaScript and no CDN: summary tiles, a
-  stacked time series, top agents, top pages and AI referrals, filtered by
-  24 hours, 7, 30 or 90 days. Hovering a column or bar opens a popover with
-  its breakdown (CSS only).
+- Server-rendered dashboard with no CDN, drawn in the viewer's own time zone:
+  summary tiles, a stacked time series, top agents, top pages and AI referrals,
+  filtered by 24 hours, 7, 30 or 90 days. Hovering a column or bar opens a
+  popover with its breakdown (CSS only).
 - CSV export from the dashboard: any date range, per day, ISO week or month,
   totals, or raw rows, for AI agents, AI referrals, people or all of them,
   broken down by site, page, agent, purpose, verification or assistant.
@@ -66,8 +66,10 @@ breakdown is what this package records and shows.
 
 ## The dashboard
 
-Server-rendered HTML and inline SVG: no JavaScript, no CDN, and it follows the
-system light or dark setting. Below the headline tiles and the chart, it
+Server-rendered HTML and inline SVG: no CDN, and it follows the system light or
+dark setting. Its only JavaScript is a few lines, allowed by CSP hash, that store
+the browser's time zone in a cookie so every chart and timestamp is drawn in the
+viewer's zone; without it the configured `timeZone` is used. Below the headline tiles and the chart, it
 breaks traffic down by agent (with how much of it was verified), by page (with
 the user-triggered share), and by AI assistant for human referrals. With
 [page views](#page-views-optional) on, a second tab shows how often people read
@@ -102,7 +104,7 @@ Add the package to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Swiftly-Developed/SwiftlyBotKit.git", from: "0.1.0"),
+    .package(url: "https://github.com/Swiftly-Developed/SwiftlyBotKit.git", from: "0.6.0"),
 ],
 ```
 
@@ -368,13 +370,13 @@ is not installed.
 | `username` | `.environment("BOT_DASHBOARD_USER")` | Sign-in username. |
 | `password` | `.environment("BOT_DASHBOARD_PASSWORD")` | Sign-in password. |
 | `title` | `AI bot traffic` | Heading and page title. |
-| `timeZone` | `.utc` | Zone every hourly and daily bucket is drawn in. A `BotKitTimeZone` case per canonical IANA zone, such as `.americaNewYork`. |
+| `timeZone` | `.utc` | Zone buckets are drawn in when the viewer's browser does not report one (JavaScript off, or a zone this host does not know). A `BotKitTimeZone` case per canonical IANA zone, such as `.americaNewYork`. |
 | `dateRanges` | all `BotDateRange` cases | Range pills offered: `.day` (24h), `.week` (7d), `.month` (30d), `.quarter` (90d). |
 | `defaultDateRange` | `.week` | Range shown when the URL names none. |
 | `sessionCookieName` | `botkit_dashboard` | Session cookie name. |
 | `sessionLifetime` | 12 hours | How long a sign-in lasts. |
 | `secureCookies` | `.automatic` | When the cookie is `Secure`: `.automatic`, `.always` or `.never`. |
-| `signInPage` | SwiftlyBotKit logo, dashboard colours | `SignInPage(logo:colors:darkColors:)`. `logo`: `.swiftlyBotKit` (embedded), `.image(url:altText:)` for your own, or `.none`. `colors`/`darkColors`: `SignInColors` (background, card, text, secondaryText, border, button, buttonText), each optional; without `darkColors`, `colors` applies in both modes. Invalid values throw at install. |
+| `signInPage` | SwiftlyBotKit logo, dashboard colours | `SignInPage(logo:siteLogos:colors:darkColors:)`. `logo`: `.swiftlyBotKit` (embedded), `.image(url:altText:darkURL:)` for your own (with an optional dark-mode variant), or `.none`. `siteLogos`: a logo per site key, used instead of `logo` on that site's sign-in page. `colors`/`darkColors`: `SignInColors` (background, card, text, secondaryText, border, button, buttonText), each optional; without `darkColors`, `colors` applies in both modes. Invalid values throw at install. |
 | `loginLimit` | 5 failures per 15 minutes | `LoginLimit(maximumFailures:window:)`, per client (IPv6 per /64), in memory. A process-wide ceiling of 50 failures per window applies on top. |
 
 The dashboard is mounted only when both `username` and `password` resolve to
@@ -492,7 +494,7 @@ expires, so change the password if a cookie may have leaked. Sign-in and
 sign-out refuse cross-site requests (by `Sec-Fetch-Site`, else `Origin`), and
 every dashboard response sends `no-store`, `X-Frame-Options: DENY`,
 `nosniff`, `Referrer-Policy: same-origin`, `noindex` and a
-`Content-Security-Policy` that allows no script.
+`Content-Security-Policy` that allows only the time zone script, by hash.
 
 **Signing secret.** Set `BOT_DASHBOARD_SECRET` in production to a long random
 value, and keep it stable. It signs the stateless session cookie, so anyone who

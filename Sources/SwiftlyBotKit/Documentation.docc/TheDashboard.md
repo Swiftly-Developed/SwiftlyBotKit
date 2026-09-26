@@ -12,7 +12,7 @@ The dashboard is mounted at ``BotKitConfiguration/Dashboard/path``, `/admin/ai-b
 - `POST /admin/ai-bots/login`: signs in with the form fields `username` and `password`.
 - `POST /admin/ai-bots/logout`: signs out.
 
-Every response from these routes, including the sign-in and sign-out redirects, sends `X-Robots-Tag: noindex, nofollow`, `Cache-Control: no-store`, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and a `Content-Security-Policy` that allows no script at all (see "Response headers" below). Keep the path under something your `robots.txt` disallows as well.
+Every response from these routes, including the sign-in and sign-out redirects, sends `X-Robots-Tag: noindex, nofollow`, `Cache-Control: no-store`, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and a `Content-Security-Policy` that allows exactly one script, by hash (see "Response headers" below). Keep the path under something your `robots.txt` disallows as well.
 
 It is mounted on every host the app answers for, so a multi-site app has one dashboard across all of its sites, with the site switcher doing the filtering.
 
@@ -43,7 +43,7 @@ The switcher is a menu of links with each site's logo, and is hidden when fewer 
 
 ### Time zones
 
-A bucket is one local wall-clock hour (24h) or one local calendar day (7d, 30d, 90d) in ``BotKitConfiguration/Dashboard/timeZone``. Every boundary is computed in Swift, from Foundation's rules for that zone, and PostgreSQL is sent the boundaries as instants: it sorts rows between them with `width_bucket` and never sees the zone's name. So the two sides cannot disagree about a DST change, and the zone does not have to exist in the database server's tz data.
+A bucket is one local wall-clock hour (24h) or one local calendar day (7d, 30d, 90d) in the viewer's time zone (see below), else in ``BotKitConfiguration/Dashboard/timeZone``. Every boundary is computed in Swift, from Foundation's rules for that zone, and PostgreSQL is sent the boundaries as instants: it sorts rows between them with `width_bucket` and never sees the zone's name. So the two sides cannot disagree about a DST change, and the zone does not have to exist in the database server's tz data.
 
 Around DST changes the buckets follow the wall clock:
 
@@ -59,7 +59,7 @@ A bot row with no purpose, which only a writer other than this package can leave
 
 ### How it is built
 
-The charts are server-rendered inline SVG and CSS bars. Hovering or tapping a column opens a popover with that hour or day's breakdown, each part's count and share and the total; hovering a bar row opens one with its split (people and AI agents, user-triggered and crawled, or an agent's verified and spoofed visits). The popovers are CSS only. There is no JavaScript and no CDN dependency, so the page renders the same whether or not a third-party host is reachable. Everything that comes from the database, including agent names and request paths, is escaped before it reaches the markup, because both are attacker-influenced text.
+The charts are server-rendered inline SVG and CSS bars. Hovering or tapping a column opens a popover with that hour or day's breakdown, each part's count and share and the total; hovering a bar row opens one with its split (people and AI agents, user-triggered and crawled, or an agent's verified and spoofed visits). The popovers are CSS only. There is no CDN dependency, so the page renders the same whether or not a third-party host is reachable, and the only JavaScript is the few lines described in "Viewer's time zone" below; without it the page renders the same, in the configured zone. Everything that comes from the database, including agent names and request paths, is escaped before it reaches the markup, because both are attacker-influenced text.
 
 Purpose colours come from a fixed categorical palette, assigned in ``AIAgentPurpose/displayOrder``. The stack is drawn in the same order, so neighbouring segments always use adjacent palette slots, which is the pairing the palette was checked for colour-blind readability against. Every legend entry also carries its count, and the agent and page breakdowns are tables, so no reading depends on colour alone.
 
@@ -82,7 +82,18 @@ config.dashboard.signInPage = .init(
 )
 ```
 
-``SignInLogo/image(url:altText:)`` takes a root-relative path your app serves, an absolute `https` URL (its origin is added to the page's `img-src`), or a `data:image/` URL; ``SignInLogo/none`` shows no logo. Every ``SignInColors`` field is optional and anything left `nil` keeps the dashboard's colour. The colours apply in light and dark mode alike unless ``BotKitConfiguration/SignInPage/darkColors`` is set. Colours and the logo URL are written into the page, so values that are not plain colours or URLs make `BotKit.configureRoutes(for:config:)` throw ``BotKitConfigurationError/invalidSignInColor(_:_:)`` or ``BotKitConfigurationError/invalidSignInLogo(_:)``.
+``SignInLogo/image(url:altText:darkURL:)`` takes a root-relative path your app serves, an absolute `https` URL (its origin is added to the page's `img-src`), or a `data:image/` URL, and optionally a `darkURL` in the same forms, shown instead when the visitor's system is in dark mode; ``SignInLogo/none`` shows no logo. Every ``SignInColors`` field is optional and anything left `nil` keeps the dashboard's colour. The colours apply in light and dark mode alike unless ``BotKitConfiguration/SignInPage/darkColors`` is set. Colours and the logo URL are written into the page, so values that are not plain colours or URLs make `BotKit.configureRoutes(for:config:)` throw ``BotKitConfigurationError/invalidSignInColor(_:_:)`` or ``BotKitConfigurationError/invalidSignInLogo(_:)``.
+
+The dashboard is mounted on every host, so in a multi-site app each site can have its own logo. ``BotKitConfiguration/SignInPage/siteLogos`` is keyed by what ``BotKitConfiguration/siteKey`` returns for the sign-in request; a site without an entry gets ``BotKitConfiguration/SignInPage/logo``, and the alt text defaults to the site's ``BotDashboardSite/name``:
+
+```swift
+config.dashboard.signInPage.siteLogos = [
+    "shop": .image(url: "/images/shop.png", darkURL: "/images/shop-dark.png"),
+    "docs": .image(url: "/images/docs.svg"),
+]
+```
+
+With ``BotKitConfiguration/sites`` configured, a key that is not one of theirs is almost certainly a typo, so it throws ``BotKitConfigurationError/unknownSignInLogoSite(_:)`` at install.
 
 #### Throttling
 
@@ -97,9 +108,15 @@ An attempt counts against both limits before the password is checked, in one ste
 
 Sign-out clears the cookie in the browser. Because sessions are stateless, it does not revoke a copy of the cookie taken earlier: that copy stays valid until it expires, or until the password or the signing secret changes. If a cookie may have leaked, change the dashboard password.
 
+#### Viewer's time zone
+
+Every chart, bucket and timestamp is drawn in the time zone of the browser looking at it, not the server's. A browser does not send its zone, so a short inline script on the sign-in page and on both tabs reads it (`Intl.DateTimeFormat().resolvedOptions().timeZone`) and stores it in a cookie named after the session cookie with `_tz` appended (`botkit_dashboard_tz` by default), scoped to the dashboard path. The server reads that cookie on every request. Signing in sets it, so the first dashboard view is already in the right zone; if the zone changes later (travelling, a new laptop), the page sets the new value and reloads once.
+
+The cookie holds only an IANA zone name. A value that is not one, or names a zone this host's tz database does not know, is ignored, and so is a browser with JavaScript off: those fall back to ``BotKitConfiguration/Dashboard/timeZone``. The chart caption always names the zone actually used.
+
 #### Response headers
 
-The `Content-Security-Policy` is `default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`. The pages need no script; inline `<style>`, `style` attributes and inline SVG are covered by `style-src 'unsafe-inline'`. When a ``BotDashboardSite/logoPath`` is an absolute `http` or `https` URL, its origin is added to `img-src`; root-relative paths are covered by `'self'`.
+The `Content-Security-Policy` is `default-src 'none'; script-src 'sha256-…'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`. The hash allows the time zone script and nothing else, so no other inline or loaded script can run; inline `<style>`, `style` attributes and inline SVG are covered by `style-src 'unsafe-inline'`. When a ``BotDashboardSite/logoPath`` is an absolute `http` or `https` URL, its origin is added to `img-src`; root-relative paths are covered by `'self'`.
 
 ### Database
 

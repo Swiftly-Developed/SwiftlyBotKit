@@ -33,7 +33,7 @@ swift Scripts/generate-time-zones.swift       # regenerate BotKitTimeZone from z
 - **Verification feeds:** decode from raw bytes with `JSONDecoder`, never `response.content`. Some operators serve JSON as `application/octet-stream`.
 - **Recording never delays or alters the response.** The middleware does one synchronous catalog lookup and writes in a detached task.
 - **Time zones:** every bucket boundary is computed in Swift (`BotDateRange.window`) and sent to PostgreSQL as instants for `width_bucket`. Never hand PostgreSQL a zone name: its tz data can lack or disagree on a zone, and it reads `GMT+0100` with an inverted sign, in hours. `BotKitTimeZone` cases are the canonical `zone.tab` names; legacy names are deprecated aliases.
-- **HTML:** every database- or request-sourced string goes through `BotCharts.escape`. Charts are server-rendered SVG, no JavaScript. Hover popovers are CSS only (`:hover`/`:focus` on an HTML layer over the SVG), since the CSP allows no script.
+- **HTML:** every database- or request-sourced string goes through `BotCharts.escape`. Charts are server-rendered SVG. Hover popovers are CSS only (`:hover`/`:focus` on an HTML layer over the SVG). The only JavaScript is `ViewerTimeZone`, allowed by CSP hash and by nothing else: changing its source changes the hash automatically, but keep it free of any request data, and do not add script for anything CSS can do.
 - **Page views store counters only.** `page_view_counts` is site, path, quarter-hour and a count. Never add a column, log line or in-memory field that holds anything about the visitor (IP, IP hash, user agent, full referrer, query string, cookie, per-visit time): the whole claim of the feature is that nothing identifying is kept. Request headers may be read to decide whether to count, then dropped. Buckets stay quarter-hours so every zone's day boundary falls between them.
 - **Page view dimensions are coarse, daily and at most two per row.** `PageViewFacts.derive` is the only code that reads the IP, `Referer`, user agent, `Accept-Language` and query string for them, and it returns closed-list or sanitised values only (country code, host name, campaign token, browser family plus major version). `page_view_dimension_counts` crosses one dimension with site, day and path; `page_view_pair_counts` crosses two with site and day, no path. Never add a third dimension to a row, a finer bucket than a day, a city, a full referrer URL, `utm_term`, or a high-entropy client hint, and never send the IP to an external service (the country table is local, `CountryLookup`). A new dimension is a privacy-policy change as well as a code change.
 - **CSV export:** never add `ip_hash` or `user_agent` to an export, and keep every text field going through `BotExportCSV.field`, which escapes values a spreadsheet would run as formulas. Raw exports stay streamed and keyset-paged on `(microseconds, key)`; an `OFFSET` or a `Date` cursor would skip or repeat rows sharing an instant.
@@ -46,3 +46,13 @@ swift Scripts/generate-time-zones.swift       # regenerate BotKitTimeZone from z
 - Linux-compatible Foundation: `DateFormatter`, not `Date.formatted`; `Double`, not `CGFloat`.
 - `///` doc comment on every public symbol.
 - No em dashes in code, comments or docs.
+
+## Versions
+
+One version per released change, see "Versions and releases" in `CONTRIBUTING.md`:
+
+- A feature is a minor bump (`0.5.0` to `0.6.0`), however many commits it took.
+- A fix is a patch bump on the latest release (`0.6.0` to `0.6.1`).
+- Tests, tooling and refactors ship with the next feature or fix, untagged.
+- Every version gets a tag (`x.y.z`, no `v`), its own `CHANGELOG.md` section with a compare link, and a GitHub Release with that section as notes.
+- A change lands under `## [Unreleased]`; the section is renamed to its version when it is published. Bump the `from:` version in the README, `GettingStarted.md` and the tutorial's `add-02-package.swift` when a release adds API they use.

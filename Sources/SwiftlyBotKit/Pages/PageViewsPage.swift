@@ -6,7 +6,7 @@ import Elementary
 ///
 /// Same chrome as ``DashboardPage`` (header, tabs, site switcher, range
 /// pills) plus an audience filter: people, AI agents, or both. The same rules
-/// apply: no script, nothing loaded from elsewhere, every stored string
+/// apply: no script but ``ViewerTimeZone``, nothing loaded from elsewhere, every stored string
 /// escaped.
 ///
 /// People are drawn in the first palette slot and AI agents in the second;
@@ -41,6 +41,7 @@ enum PageViewsPage {
                     [DashboardSection.pageViews.label, siteName, options.title].compactMap { $0 }.joined(separator: " \u{00B7} ")
                 }
                 style { HTMLRaw(DashboardTheme.css) }
+                ViewerTimeZone.element(options, reloads: true)
             }
             body {
                 main {

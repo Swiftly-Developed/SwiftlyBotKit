@@ -37,7 +37,7 @@ struct BotDashboardController: RouteCollection {
         self.password = password
         self.sessionBinding = runtime.signer.credentialBinding(username: username, password: password)
         self.contentSecurityPolicy = Self.contentSecurityPolicy(
-            logoPaths: config.sites.compactMap(\.logoPath) + [config.dashboard.signInPage.logoOrigin].compactMap { $0 }
+            logoPaths: config.sites.compactMap(\.logoPath) + config.dashboard.signInPage.absoluteLogoURLs
         )
     }
 
@@ -62,10 +62,11 @@ struct BotDashboardController: RouteCollection {
 
     private func index(_ req: Request) async throws -> Response {
         guard isSignedIn(req) else {
-            return html(LoginPage.render(error: nil, options: options))
+            return signInPage(req)
         }
         guard let sql = database(req) else { return unavailable(req) }
         let (range, site) = filters(req)
+        let options = ViewerTimeZone.options(for: req.headers, self.options)
         let data = try await BotDashboardQueries(database: sql, timeZone: options.timeZone.foundationTimeZone)
             .load(range: range, siteKey: site?.key)
 
@@ -83,21 +84,27 @@ struct BotDashboardController: RouteCollection {
 
     private func pageViews(_ req: Request) async throws -> Response {
         guard isSignedIn(req) else {
-            return html(LoginPage.render(error: nil, options: options))
+            return signInPage(req)
         }
         guard let sql = database(req) else { return unavailable(req) }
         let (range, site) = filters(req)
         let audience = PageViewAudience(query: req.query[String.self, at: "audience"])
+        let options = ViewerTimeZone.options(for: req.headers, self.options)
         let dimensions = config.pageViews.dimensions
         var colorBy = PageViewColorBy(query: req.query[String.self, at: "color"])
         if !PageViewColorBy.options(dimensionsEnabled: dimensions.isEnabled).contains(colorBy) { colorBy = .none }
         let queries = PageViewQueries(database: sql, timeZone: options.timeZone.foundationTimeZone)
         let data = try await queries.load(range: range, siteKey: site?.key, audience: audience)
         // The breakdowns are of people's page views only.
+        // A dimension's days were stored in the configured zone, so they are
+        // bucketed there whatever zone the viewer is in.
+        let breakdownQueries = colorBy.isDaily
+            ? PageViewQueries(database: sql, timeZone: self.options.timeZone.foundationTimeZone)
+            : queries
         let breakdown = audience == .people
-            ? try await queries.breakdown(colorBy, range: range, siteKey: site?.key,
-                                          smallCellThreshold: dimensions.effectiveSmallCellThreshold,
-                                          pages: data.topPages)
+            ? try await breakdownQueries.breakdown(colorBy, range: range, siteKey: site?.key,
+                                                   smallCellThreshold: dimensions.effectiveSmallCellThreshold,
+                                                   pages: data.topPages)
             : nil
 
         return html(PageViewsPage.render(
@@ -127,9 +134,10 @@ struct BotDashboardController: RouteCollection {
 
     private func exportForm(_ req: Request) async throws -> Response {
         guard isSignedIn(req) else {
-            return html(LoginPage.render(error: nil, options: options))
+            return signInPage(req)
         }
         let (_, site) = filters(req)
+        let options = ViewerTimeZone.options(for: req.headers, self.options)
         return html(ExportPage.render(
             options: exportOptions(req),
             sites: config.sites,
@@ -147,10 +155,11 @@ struct BotDashboardController: RouteCollection {
     /// reports as a failed download.
     private func exportCSV(_ req: Request) async throws -> Response {
         guard isSignedIn(req) else {
-            return html(LoginPage.render(error: nil, options: options))
+            return signInPage(req)
         }
         guard let sql = database(req) else { return unavailable(req) }
         let (_, site) = filters(req)
+        let options = ViewerTimeZone.options(for: req.headers, self.options)
         let submitted = exportOptions(req)
         let plan: BotExportPlan
         do {
@@ -261,7 +270,7 @@ struct BotDashboardController: RouteCollection {
         case .allowed(let at):
             reservation = at
         case .blocked:
-            return tooManyAttempts()
+            return tooManyAttempts(req)
         case .globallyBlocked:
             if await limiter.shouldReportGlobalTrip() {
                 req.logger.critical(
@@ -269,7 +278,7 @@ struct BotDashboardController: RouteCollection {
                     metadata: ["client": .string(client)]
                 )
             }
-            return tooManyAttempts()
+            return tooManyAttempts(req)
         }
 
         let submitted = (try? req.content.decode(Credentials.self)) ?? Credentials()
@@ -280,10 +289,7 @@ struct BotDashboardController: RouteCollection {
         guard userMatches && passwordMatches else {
             // The reservation already counts as the failure.
             req.logger.warning("Rejected AI bot dashboard sign-in.", metadata: ["client": .string(client)])
-            return html(
-                LoginPage.render(error: "That username and password did not match.", options: options),
-                status: .unauthorized
-            )
+            return signInPage(req, error: "That username and password did not match.", status: .unauthorized)
         }
 
         await limiter.succeeded(client, reservation: reservation)
@@ -458,9 +464,9 @@ struct BotDashboardController: RouteCollection {
 
     // MARK: - Responses
 
-    /// The page needs no script and loads nothing from elsewhere, except site
-    /// logos, which may be absolute URLs: their origins are added to
-    /// `img-src`. Inline `<style>`, `style=` attributes and inline SVG need
+    /// The page loads nothing from elsewhere, except site logos, which may be
+    /// absolute URLs: their origins are added to `img-src`. Its one script,
+    /// ``ViewerTimeZone``, is allowed by hash. Inline `<style>`, `style=` attributes and inline SVG need
     /// only `style-src 'unsafe-inline'`.
     static func contentSecurityPolicy(logoPaths: [String]) -> String {
         var imageSources = ["'self'", "data:"]
@@ -474,7 +480,7 @@ struct BotDashboardController: RouteCollection {
             let source = "\(scheme)://\(host)" + (components.port.map { ":\($0)" } ?? "")
             if !imageSources.contains(source) { imageSources.append(source) }
         }
-        return "default-src 'none'; style-src 'unsafe-inline'; img-src \(imageSources.joined(separator: " ")); "
+        return "default-src 'none'; script-src \(ViewerTimeZone.cspSource); style-src 'unsafe-inline'; img-src \(imageSources.joined(separator: " ")); "
             + "form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
     }
 
@@ -506,12 +512,24 @@ struct BotDashboardController: RouteCollection {
         harden(req.redirect(to: "\(options.basePath)/"))
     }
 
-    private func tooManyAttempts() -> Response {
-        html(
+    /// The sign-in page, with the logo of the site the request is on.
+    private func signInPage(_ req: Request, error: String? = nil, status: HTTPStatus = .ok) -> Response {
+        let key = config.siteKey(req)
+        return html(
             LoginPage.render(
-                error: "Too many attempts. Try again in \(Self.describe(runtime.loginAttempts.window)).",
-                options: options
+                error: error,
+                options: options,
+                siteKey: key,
+                siteName: config.sites.first { $0.key == key }?.name
             ),
+            status: status
+        )
+    }
+
+    private func tooManyAttempts(_ req: Request) -> Response {
+        signInPage(
+            req,
+            error: "Too many attempts. Try again in \(Self.describe(runtime.loginAttempts.window)).",
             status: .tooManyRequests
         )
     }

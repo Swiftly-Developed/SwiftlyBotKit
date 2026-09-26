@@ -39,9 +39,13 @@ public enum BotKitConfigurationError: Error, Sendable, Equatable, CustomStringCo
     /// colour (named field, value).
     case invalidSignInColor(String, String)
 
-    /// ``SignInLogo/image(url:altText:)`` has a URL that is not a
+    /// ``SignInLogo/image(url:altText:darkURL:)`` has a URL that is not a
     /// root-relative path, an absolute http(s) URL or a `data:image/` URL.
     case invalidSignInLogo(String)
+
+    /// ``BotKitConfiguration/SignInPage/siteLogos`` has a key that is not
+    /// one of ``BotKitConfiguration/sites``.
+    case unknownSignInLogoSite(String)
 
     /// A description of what is wrong and how to fix it.
     public var description: String {
@@ -58,6 +62,8 @@ public enum BotKitConfigurationError: Error, Sendable, Equatable, CustomStringCo
             return "Invalid BotKit sign-in page colour \(name) = \(value.debugDescription): use a CSS colour such as #6366F1, rgb(99 102 241) or white, using only letters, digits, spaces and # ( ) , . % / -."
         case .invalidSignInLogo(let url):
             return "Invalid BotKit sign-in logo URL \(String(url.prefix(120)).debugDescription): use a root-relative path such as /images/logo.png, an absolute https URL, or a data:image/ URL, without quotes, spaces or angle brackets."
+        case .unknownSignInLogoSite(let key):
+            return "The BotKit sign-in logo for site \(key.debugDescription) would never be shown: no site in BotKitConfiguration.sites has that key. Use a key from sites, as siteKey returns it."
         case .pageViewsNotMigrated:
             return "BotKit page views are enabled, but BotKit.configure(for:database:pageViews:) was called without pageViews: true, so their table is never created. Pass pageViews: true there, or use BotKit.install(on:config:)."
         case .pageViewDimensionsNotMigrated:
@@ -74,6 +80,11 @@ extension BotKitConfiguration {
         try dashboard.validatePath()
         try dashboard.validateCookieName()
         try dashboard.signInPage.validate()
+        if !sites.isEmpty, let key = dashboard.signInPage.siteLogos.keys.sorted().first(where: { key in
+            !sites.contains { $0.key == key }
+        }) {
+            throw BotKitConfigurationError.unknownSignInLogoSite(key)
+        }
         if let site = sites.first(where: { $0.key == Self.reservedAllSitesKey }) {
             throw BotKitConfigurationError.reservedSiteKey(site.key)
         }

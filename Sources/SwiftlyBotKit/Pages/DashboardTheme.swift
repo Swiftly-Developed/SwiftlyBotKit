@@ -181,7 +181,7 @@ enum DashboardTheme {
     .plot{position:relative;min-width:560px}
     .axis{fill:var(--muted);font-size:11px}
 
-    /* Hover popovers. CSS only: the CSP allows no script. A column's target
+    /* Hover popovers. CSS only: the CSP allows no script but ViewerTimeZone. A column's target
        is its whole band; tapping works too, via tabindex="-1" and :focus. */
     .hits{position:absolute;inset:0}
     .col{position:absolute;border-radius:4px;outline:none;cursor:default}

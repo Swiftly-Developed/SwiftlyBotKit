@@ -125,5 +125,25 @@ issue to discuss it first.
 - Add a line under `## [Unreleased]` in `CHANGELOG.md` for user-visible
   changes.
 
+## Versions and releases
+
+SwiftlyBotKit follows [Semantic Versioning](https://semver.org). Every change
+that reaches users is released on its own, as its own version:
+
+- **A feature is a minor version** (`0.4.0` to `0.5.0`), even when it took
+  several commits. It resets the patch number.
+- **A fix is a patch version** (`0.5.0` to `0.5.1`), on top of the latest
+  release. A fix to the docs that users read, such as a broken link, counts.
+- **Tests, tooling and internal refactors are not released** on their own;
+  they go out with the next feature or fix.
+- Until 1.0, a breaking change is also a minor version, and its changelog
+  entry starts with **Breaking:** and says how to migrate.
+
+Each version gets a tag (`x.y.z`, no `v` prefix) on the commit that completes
+it, a `## [x.y.z] - yyyy-MM-dd` section in `CHANGELOG.md` with its compare
+link, and a GitHub Release whose notes are that section. When several
+changes are published at once, each is still tagged on its own commit, in
+the order they landed, so every version can be depended on by itself.
+
 By contributing, you agree that your contributions are licensed under the MIT
 License that covers this project.

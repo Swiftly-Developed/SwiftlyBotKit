@@ -187,7 +187,7 @@ config.clientIP = .forwardedFor(trustedProxies: 2)
 | ``BotKitConfiguration/Dashboard/username`` | `.environment("BOT_DASHBOARD_USER")` | Sign-in username |
 | ``BotKitConfiguration/Dashboard/password`` | `.environment("BOT_DASHBOARD_PASSWORD")` | Sign-in password |
 | ``BotKitConfiguration/Dashboard/title`` | `AI bot traffic` | Heading and page title |
-| ``BotKitConfiguration/Dashboard/timeZone`` | ``BotKitTimeZone/utc`` | Where hourly and daily bucket boundaries fall |
+| ``BotKitConfiguration/Dashboard/timeZone`` | ``BotKitTimeZone/utc`` | Where hourly and daily bucket boundaries fall when the viewer's browser reports no zone |
 | ``BotKitConfiguration/Dashboard/dateRanges`` | every ``BotDateRange`` | Filter pills, in order |
 | ``BotKitConfiguration/Dashboard/defaultDateRange`` | ``BotDateRange/week`` | Range shown when the URL names none |
 | ``BotKitConfiguration/Dashboard/sessionCookieName`` | `botkit_dashboard` | Session cookie name |

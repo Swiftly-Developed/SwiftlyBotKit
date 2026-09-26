@@ -11,7 +11,7 @@ The form is a plain `GET` to `<path>/export/csv`, so it works without script, an
 ### What you choose
 
 - **Site**: the site switcher above the form, as on every tab. `all` exports every site.
-- **Period**: one of the dashboard's date ranges, which end now, or custom dates. Custom dates are whole local days in ``BotKitConfiguration/Dashboard/timeZone``, both included, up to ten years.
+- **Period**: one of the dashboard's date ranges, which end now, or custom dates. Custom dates are whole local days in the viewer's time zone (else ``BotKitConfiguration/Dashboard/timeZone``), both included, up to ten years.
 - **Level of detail**: raw rows, per day, per ISO week (Monday to Sunday), per calendar month, or totals over the whole period.
 - **Include**: any combination of AI agents, AI referrals and people. People are offered only with ``BotKitConfiguration/PageViews`` on. *AI agents: page reads only* narrows AI agents to successful `GET`s of a page, the rows the Page views tab counts, so they compare like for like with people.
 - **Break down by**: site, page, agent and operator, purpose, verification, and referring assistant. A breakdown applies to the audiences that have it: an agent name to AI agents, a referring assistant to AI referrals, a page to all three.
@@ -44,7 +44,7 @@ Values that come from requests, such as paths, are written so a spreadsheet cann
 
 ### How it is built
 
-Periods are computed in Swift in the dashboard's time zone and sent to PostgreSQL as instants, exactly like the dashboard's buckets, so an export and the chart agree across DST changes. See <doc:TheDashboard>.
+Periods are computed in Swift in the same zone the dashboard is drawn in, the viewer's, and sent to PostgreSQL as instants, exactly like the dashboard's buckets, so an export and the chart agree across DST changes. See <doc:TheDashboard>.
 
 A grouped export is built in full before the response starts, so a failed query is an error page, not a truncated file. A raw export has no such bound, so it is streamed: rows are read in pages of 5,000, each page continuing from the last row's time and key, and written as they are read. Memory stays flat however long the period, and a slow client never holds more than one page. An error part way through ends the download as failed.
 

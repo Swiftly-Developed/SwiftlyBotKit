@@ -10,7 +10,7 @@ let package = Package(
         .package(url: "https://github.com/vapor/vapor.git", from: "4.99.0"),
         .package(url: "https://github.com/vapor/fluent.git", from: "4.9.0"),
         .package(url: "https://github.com/vapor/fluent-postgres-driver.git", from: "2.8.0"),
-        .package(url: "https://github.com/Swiftly-Developed/SwiftlyBotKit.git", from: "0.1.0"),
+        .package(url: "https://github.com/Swiftly-Developed/SwiftlyBotKit.git", from: "0.6.0"),
     ],
     targets: [
         .executableTarget(
