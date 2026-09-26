@@ -56,7 +56,8 @@ breakdown is what this package records and shows.
   site switcher.
 - Server-rendered dashboard with no JavaScript and no CDN: summary tiles, a
   stacked time series, top agents, top pages and AI referrals, filtered by
-  24 hours, 7, 30 or 90 days.
+  24 hours, 7, 30 or 90 days. Hovering a column or bar opens a popover with
+  its breakdown (CSS only).
 - Custom agents and referrer hosts can be added, and built-in ones
   reclassified, through configuration.
 

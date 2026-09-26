@@ -55,7 +55,7 @@ A bot row with no purpose, which only a writer other than this package can leave
 
 ### How it is built
 
-The charts are server-rendered inline SVG and CSS bars. Hovering or tapping a column opens a popover with that hour or day's breakdown, each part's count and share and the total. The popovers are CSS only. There is no JavaScript and no CDN dependency, so the page renders the same whether or not a third-party host is reachable. Everything that comes from the database, including agent names and request paths, is escaped before it reaches the markup, because both are attacker-influenced text.
+The charts are server-rendered inline SVG and CSS bars. Hovering or tapping a column opens a popover with that hour or day's breakdown, each part's count and share and the total; hovering a bar row opens one with its split (people and AI agents, user-triggered and crawled, or an agent's verified and spoofed visits). The popovers are CSS only. There is no JavaScript and no CDN dependency, so the page renders the same whether or not a third-party host is reachable. Everything that comes from the database, including agent names and request paths, is escaped before it reaches the markup, because both are attacker-influenced text.
 
 Purpose colours come from a fixed categorical palette, assigned in ``AIAgentPurpose/displayOrder``. The stack is drawn in the same order, so neighbouring segments always use adjacent palette slots, which is the pairing the palette was checked for colour-blind readability against. Every legend entry also carries its count, and the agent and page breakdowns are tables, so no reading depends on colour alone.
 

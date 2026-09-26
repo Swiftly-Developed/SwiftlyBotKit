@@ -140,7 +140,7 @@ enum DashboardTheme {
     .tip{display:none;position:absolute;z-index:5;width:max-content;min-width:170px;max-width:260px;
       padding:9px 11px;border-radius:9px;background:var(--surface-1);border:1px solid var(--border);
       box-shadow:0 8px 24px rgba(0,0,0,.22);font-size:12.5px;line-height:1.4;pointer-events:none;text-align:left}
-    .col:hover .tip,.col:focus .tip{display:block}
+    .col:hover .tip,.col:focus .tip,.row:hover .tip,.row:focus .tip{display:block}
     .tip-title{font-weight:650;color:var(--text-primary);overflow-wrap:anywhere}
     .tip-sub{color:var(--muted);font-size:12px}
     .tip-foot{margin-top:5px}
@@ -151,5 +151,10 @@ enum DashboardTheme {
     .tip-line b{color:var(--text-primary);font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
     .tip-line em{font-style:normal;font-weight:400;color:var(--muted);margin-left:6px}
     .tip-total{border-top:1px solid var(--border);padding-top:4px;margin-top:6px}
+    /* A row's popover opens under the end of its bar, kept inside the row. */
+    .row{position:relative;outline:none}
+    .row .pop{position:absolute;left:0;right:0;top:100%}
+    .row .tip{top:4px;width:240px;max-width:100%;left:clamp(0px,calc(var(--at) - 120px),calc(100% - 240px))}
+    .row:hover .track,.row:focus .track{background:var(--baseline)}
     """
 }

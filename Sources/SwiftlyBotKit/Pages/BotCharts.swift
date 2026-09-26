@@ -232,6 +232,11 @@ enum BotCharts {
         /// beside it. Used for the user-triggered share of a page's traffic.
         let highlight: Int?
         let highlightColor: String?
+        /// Lines of the row's hover popover under the name. Empty shows the
+        /// value alone.
+        let details: [PopoverLine]
+        /// Grey line at the foot of the popover.
+        let detailNote: String?
 
         init(
             name: String,
@@ -241,7 +246,9 @@ enum BotCharts {
             color: String,
             flag: String?,
             highlight: Int? = nil,
-            highlightColor: String? = nil
+            highlightColor: String? = nil,
+            details: [PopoverLine] = [],
+            detailNote: String? = nil
         ) {
             self.name = name
             self.meta = meta
@@ -251,6 +258,8 @@ enum BotCharts {
             self.flag = flag
             self.highlight = highlight
             self.highlightColor = highlightColor
+            self.details = details
+            self.detailNote = detailNote
         }
     }
 
@@ -262,7 +271,7 @@ enum BotCharts {
         var html = "<div class=\"rows\">"
         for row in rows {
             let share = max(1.5, Double(row.value) / Double(peak) * 100)
-            html += "<div class=\"row\"><div class=\"head\"><div class=\"name\">\(escape(row.name))"
+            html += "<div class=\"row\" tabindex=\"-1\" style=\"--at:\(fmt(share))%\"><div class=\"head\"><div class=\"name\">\(escape(row.name))"
             if let meta = row.meta { html += "<span class=\"meta\"> \(escape(meta))</span>" }
             if let flag = row.flag { html += "<span class=\"tag bad\">\(escape(flag))</span>" }
             html += "</div><div class=\"num\">\(grouped(row.value))"
@@ -277,7 +286,19 @@ enum BotCharts {
                 html += "<div class=\"seg\(isWhole ? " whole" : "")\" style=\"width:\(fmt(portion))%;background:\(color)\"></div>"
             }
             html += "</div></div>"
-            html += "</div>"
+            // Opens under the end of the bar, clamped inside the row by CSS.
+            let lines = row.details.isEmpty
+                ? [PopoverLine(label: "Total", color: row.color, count: row.value)]
+                : row.details
+            html += "<div class=\"pop\" aria-hidden=\"true\">"
+            html += popover(
+                title: row.name,
+                subtitle: [row.meta, row.flag].compactMap { $0 }.joined(separator: " \u{00B7} ").nilIfEmpty,
+                lines: lines,
+                total: nil,
+                footer: row.detailNote
+            )
+            html += "</div></div>"
         }
         return html + "</div>"
     }
@@ -342,4 +363,8 @@ enum BotCharts {
             .replacingOccurrences(of: "\"", with: "&quot;")
             .replacingOccurrences(of: "'", with: "&#39;")
     }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }

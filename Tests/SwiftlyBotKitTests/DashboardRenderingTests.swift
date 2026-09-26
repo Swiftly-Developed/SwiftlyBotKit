@@ -195,6 +195,28 @@ final class BotChartsTests: XCTestCase {
         XCTAssertEqual(BotDateRange.week.popoverLabel(for: date, in: utc), "Mon 21 Sep")
     }
 
+    func testBarRowPopoverShowsDetailsAndEscapes() {
+        let html = BotCharts.barRows([
+            .init(name: "/<b>/", meta: nil, value: 40, note: nil, color: "var(--series-2)", flag: nil,
+                  details: [
+                      .init(label: "People", color: "var(--series-1)", count: 10, shareOf: 40),
+                      .init(label: "AI agents", color: "var(--series-2)", count: 30, shareOf: 40),
+                  ],
+                  detailNote: "40 reads in total"),
+        ])
+        XCTAssertTrue(html.contains("class=\"tip\""))
+        XCTAssertTrue(html.contains("25%"))
+        XCTAssertTrue(html.contains("75%"))
+        XCTAssertTrue(html.contains("40 reads in total"))
+        XCTAssertFalse(html.contains("<b>/"))
+    }
+
+    func testEmptySeriesStillRendersAxes() {
+        let svg = BotCharts.stackedColumns(series: [], range: .week, timeZone: .current)
+        XCTAssertTrue(svg.contains("<svg"))
+        XCTAssertFalse(svg.contains("<rect"))
+    }
+
     /// The user-triggered share is drawn inside the bar, in a second shade of
     /// the same hue, rather than living only in the text beside it.
     func testHighlightSegmentIsDrawnInsideTheBar() {
