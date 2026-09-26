@@ -45,3 +45,13 @@ swift Scripts/generate-time-zones.swift       # regenerate BotKitTimeZone from z
 - Linux-compatible Foundation: `DateFormatter`, not `Date.formatted`; `Double`, not `CGFloat`.
 - `///` doc comment on every public symbol.
 - No em dashes in code, comments or docs.
+
+## Versions
+
+One version per released change, see "Versions and releases" in `CONTRIBUTING.md`:
+
+- A feature is a minor bump (`0.5.0` to `0.6.0`), however many commits it took.
+- A fix is a patch bump on the latest release (`0.6.0` to `0.6.1`).
+- Tests, tooling and refactors ship with the next feature or fix, untagged.
+- Every version gets a tag (`x.y.z`, no `v`), its own `CHANGELOG.md` section with a compare link, and a GitHub Release with that section as notes.
+- A change lands under `## [Unreleased]`; the section is renamed to its version when it is published. Bump the `from:` version in the README, `GettingStarted.md` and the tutorial's `add-02-package.swift` when a release adds API they use.
