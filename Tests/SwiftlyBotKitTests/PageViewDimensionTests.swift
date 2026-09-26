@@ -279,8 +279,8 @@ final class PageViewColorByTests: XCTestCase {
 
     private let buckets = (0..<3).map { Date(timeIntervalSince1970: Double($0) * 86_400) }
 
-    /// Ranked by total, small values and the overflow in Other, and the
-    /// views the breakdown cannot account for in Not recorded.
+    /// Ranked by total; small values, the overflow and the views the
+    /// breakdown cannot account for all in Other.
     func testBuildRanksFoldsAndFillsTheGap() {
         let rows: [(bucket: Int, value: String, count: Int)] = [
             (0, "BE", 10), (1, "BE", 20), (2, "US", 40), (0, "LU", 2), (1, "(other)", 6),
@@ -289,9 +289,9 @@ final class PageViewColorByTests: XCTestCase {
             colorBy: .dimension(.country), buckets: buckets, isDailyFallback: false,
             rows: rows, bucketTotals: [15, 26, 40], smallCellThreshold: 5
         )
-        XCTAssertEqual(breakdown.series.map(\.label), ["US", "BE", "Other", "Not recorded"])
-        XCTAssertEqual(breakdown.series[2].counts, [2, 6, 0])
-        XCTAssertEqual(breakdown.series[3].counts, [3, 0, 0])
+        XCTAssertEqual(breakdown.series.map(\.label), ["US", "BE", "Other"])
+        // LU and "(other)", plus the 3 views of the first day with no value.
+        XCTAssertEqual(breakdown.series[2].counts, [5, 6, 0])
         XCTAssertEqual(breakdown.total, 81)
         XCTAssertEqual(breakdown.color(at: 0), "var(--cat-1)")
         XCTAssertEqual(breakdown.color(at: 2), DashboardTheme.otherColor)
@@ -348,8 +348,8 @@ final class PageViewColorByTests: XCTestCase {
         )
         breakdown.pageSplits["/a/"] = [4, 12, 8]
         let row = PageViewsPage.row(for: .init(path: "/a/", people: 24, agents: 0), breakdown: breakdown)
-        XCTAssertEqual(row.parts.map(\.color), ["var(--cat-1)", "var(--cat-2)", DashboardTheme.unrecordedColor])
-        XCTAssertEqual(row.details.map(\.label), ["US", "BE", "Not recorded"])
+        XCTAssertEqual(row.parts.map(\.color), ["var(--cat-1)", "var(--cat-2)", DashboardTheme.otherColor])
+        XCTAssertEqual(row.details.map(\.label), ["US", "BE", "Other"])
         XCTAssertEqual(row.details[1].countLabel, "<5")
         let html = BotCharts.barRows([row])
         XCTAssertTrue(html.contains("fill split"))

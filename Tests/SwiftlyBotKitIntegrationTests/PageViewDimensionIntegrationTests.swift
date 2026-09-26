@@ -115,7 +115,7 @@ final class PageViewBreakdownIntegrationTests: PostgresIntegrationTestCase {
         let facts = PageViewFacts.derive(headers: headers, query: nil, host: nil, clientIP: nil, countries: nil)
         for _ in 0..<6 { counter.record(siteKey: "a", path: "/blog/one/", facts: facts, at: now.addingTimeInterval(-3_600)) }
         for _ in 0..<2 { counter.record(siteKey: "a", path: "/blog/two/", facts: facts, at: now.addingTimeInterval(-3_600)) }
-        // Counted without dimensions: Not recorded.
+        // Counted without dimensions: they land in Other.
         for _ in 0..<3 { counter.record(siteKey: "a", path: "/", at: now.addingTimeInterval(-7_200)) }
         await counter.flush()
 
@@ -133,7 +133,7 @@ final class PageViewBreakdownIntegrationTests: PostgresIntegrationTestCase {
         let browsers = try XCTUnwrap(browsersResult)
         XCTAssertTrue(browsers.isDailyFallback)
         XCTAssertEqual(browsers.buckets.count, 2)
-        XCTAssertEqual(browsers.series.map(\.label), ["Safari", "Not recorded"])
+        XCTAssertEqual(browsers.series.map(\.label), ["Safari", "Other"])
         XCTAssertEqual(browsers.series.map(\.total), [8, 3])
         XCTAssertEqual(browsers.pageSplits["/blog/one/"], [6, 0])
         XCTAssertEqual(browsers.pageSplits["/"], [0, 3])

@@ -219,7 +219,7 @@ struct PageViewQueries: Sendable {
     /// range it is drawn as the two local days the window touches, yesterday
     /// and today. Its values under `smallCellThreshold` are folded into Other,
     /// and page views with no value for it (counted before the dimensions
-    /// were on, or without a country table) show as Not recorded.
+    /// were on, or without a country table) are added to Other.
     func breakdown(
         _ colorBy: PageViewColorBy,
         range: BotDateRange,
@@ -298,7 +298,7 @@ struct PageViewQueries: Sendable {
 
     /// Each page's views by `dimension` over the chart's days, mapped onto
     /// the breakdown's series, with what the dimension does not account for
-    /// as Not recorded.
+    /// added to Other.
     private func dimensionSplits(
         _ dimension: PageViewDimension,
         breakdown: PageViewBreakdown,
@@ -325,7 +325,7 @@ struct PageViewQueries: Sendable {
             else { continue }
             splits[path, default: Array(repeating: 0, count: breakdown.series.count)][index] += n
         }
-        guard let unrecorded = breakdown.series.firstIndex(where: { $0.kind == .unrecorded }) else { return splits }
+        guard let other = breakdown.series.firstIndex(where: { $0.kind == .other }) else { return splits }
         var viewsQuery: SQLQueryString = """
         SELECT path, SUM(views)::bigint AS n
         FROM page_view_counts
@@ -338,7 +338,7 @@ struct PageViewQueries: Sendable {
                   let n = try? row.decode(column: "n", as: Int.self)
             else { continue }
             var counts = splits[path] ?? Array(repeating: 0, count: breakdown.series.count)
-            counts[unrecorded] = max(0, n - counts.reduce(0, +))
+            counts[other] += max(0, n - counts.reduce(0, +))
             splits[path] = counts
         }
         return splits

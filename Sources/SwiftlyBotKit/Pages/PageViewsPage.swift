@@ -245,11 +245,8 @@ enum PageViewsPage {
             if breakdown.isDailyFallback {
                 hint += " \(breakdown.colorBy.label) is stored per day, so this shows yesterday and today."
             }
-            if breakdown.series.contains(where: { $0.kind == .unrecorded }) {
-                hint += " Not recorded: views counted before this breakdown was switched on\(breakdown.colorBy == .dimension(.country) ? " or without a country table" : "")."
-            }
             if let threshold = breakdown.smallCellThreshold {
-                hint += " Values with fewer than \(threshold) views are counted in Other."
+                hint += " Other holds values with fewer than \(threshold) views and views counted before this breakdown was switched on\(breakdown.colorBy == .dimension(.country) ? " or without a country table" : "")."
             }
         } else {
             hint += countingNote(data, audience: audience, timeZone: timeZone)
@@ -286,7 +283,7 @@ enum PageViewsPage {
     @HTMLBuilder
     private static func breakdownChart(_ breakdown: PageViewBreakdown, range: BotDateRange, timeZone: TimeZone) -> some HTML {
         let masks = breakdown.smallCellThreshold != nil
-        // Largest value at the baseline, Other and Not recorded on top.
+        // Largest value at the baseline, Other on top.
         let stacks = breakdown.buckets.indices.map { bucket in
             (breakdown.buckets[bucket], breakdown.series.indices.map { index -> BotCharts.ColumnSegment in
                 let count = breakdown.series[index].counts[bucket]
@@ -392,10 +389,12 @@ enum PageViewsPage {
         let order = split.indices.filter { split[$0] > 0 }
         // Largest first in the popover, catch-alls last; the bar keeps the
         // chart's order so colours sit in the same place on every row.
-        let popoverOrder = order.sorted { a, b in
-            let aRest = breakdown.series[a].kind != .value, bRest = breakdown.series[b].kind != .value
+        let popoverOrder = order.sorted { (a: Int, b: Int) -> Bool in
+            let aRest = breakdown.series[a].kind != .value
+            let bRest = breakdown.series[b].kind != .value
             if aRest != bRest { return !aRest }
-            return split[a] != split[b] ? split[a] > split[b] : a < b
+            if split[a] != split[b] { return split[a] > split[b] }
+            return a < b
         }
         let details = popoverOrder.map { index -> BotCharts.PopoverLine in
             let label = breakdown.display(split[index])

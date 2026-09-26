@@ -88,7 +88,7 @@ An app that registers migrations separately passes `pageViewDimensions: true` to
 
 The chart on the Page views tab has a **Color by** menu (`?color=`, kept by every link on the tab). **None** draws one colour per bar. **Page** and **Section** (the first path segment) stack each bar by page, at the range's own buckets. Any dimension stacks it by that dimension's values; those are stored per day, so on the 24-hour range the chart shows yesterday and today as two daily bars.
 
-Values are ranked by their total in the period and drawn in up to 23 colours, largest at the baseline; the rest go into **Other**. Page views with no value for the dimension, counted before dimensions were switched on or without a country table, show as **Not recorded**, so every bar still adds up to the page views. Under the chart, every value's total for the period is listed in its colour, and each page in **Most-read pages** is split the same way. Values with fewer views than ``BotKitConfiguration/PageViews/Dimensions/smallCellThreshold`` (default 5) are counted in Other, and counts under it are shown as `<5`.
+Values are ranked by their total in the period and drawn in up to 23 colours, largest at the baseline; the rest go into **Other**, together with page views that have no value for the dimension (counted before dimensions were switched on, or without a country table), so every bar still adds up to the page views. Under the chart, every value's total for the period is listed in its colour, and each page in **Most-read pages** is split the same way. Values with fewer views than ``BotKitConfiguration/PageViews/Dimensions/smallCellThreshold`` (default 5) are counted in Other, and counts under it are shown as `<5`.
 
 ### Privacy notices
 

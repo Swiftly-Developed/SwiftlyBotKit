@@ -23,7 +23,7 @@ enum BotCharts {
         /// cell. The share is then left out too, since it would give the
         /// count away.
         var countLabel: String? = nil
-        /// A catch-all part (Other, Not recorded), listed after the named
+        /// A catch-all part (Other), listed after the named
         /// ones in a popover sorted by size.
         var isRemainder = false
     }
@@ -121,11 +121,12 @@ enum BotCharts {
                 let drawn = max(1.5, isTop ? full : full - 2)
                 let y = cursor - full
                 let title = "<title>\(escape(range.axisLabel(for: stack.bucket, in: timeZone))) · \(escape(segment.label)): \(escape(segment.countLabel ?? grouped(segment.count)))</title>"
+                let fill = segment.color
                 if isTop {
                     let radius = min(4.0, drawn, barWidth / 2)
-                    svg += "<path d=\"\(roundedTopPath(x: x, y: y, width: barWidth, height: drawn, radius: radius))\" fill=\"\(segment.color)\">\(title)</path>"
+                    svg += "<path d=\"\(roundedTopPath(x: x, y: y, width: barWidth, height: drawn, radius: radius))\" fill=\"\(fill)\">\(title)</path>"
                 } else {
-                    svg += "<rect x=\"\(fmt(x))\" y=\"\(fmt(y + (full - drawn)))\" width=\"\(fmt(barWidth))\" height=\"\(fmt(drawn))\" fill=\"\(segment.color)\">\(title)</rect>"
+                    svg += "<rect x=\"\(fmt(x))\" y=\"\(fmt(y + (full - drawn)))\" width=\"\(fmt(barWidth))\" height=\"\(fmt(drawn))\" fill=\"\(fill)\">\(title)</rect>"
                 }
                 cursor = y
             }
@@ -162,11 +163,13 @@ enum BotCharts {
     /// Top-down as drawn, or largest first with catch-alls last.
     private static func popoverOrder(_ segments: [ColumnSegment], descending: Bool) -> [ColumnSegment] {
         guard descending else { return segments.reversed() }
-        return segments.enumerated().sorted { a, b in
+        let indexed: [(offset: Int, element: ColumnSegment)] = Array(segments.enumerated())
+        let sorted = indexed.sorted { (a: (offset: Int, element: ColumnSegment), b: (offset: Int, element: ColumnSegment)) -> Bool in
             if a.element.isRemainder != b.element.isRemainder { return !a.element.isRemainder }
             if a.element.count != b.element.count { return a.element.count > b.element.count }
             return a.offset < b.offset
-        }.map(\.element)
+        }
+        return sorted.map { $0.element }
     }
 
     // MARK: - Popovers

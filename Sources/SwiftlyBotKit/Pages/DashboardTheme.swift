@@ -43,10 +43,9 @@ enum DashboardTheme {
         "var(--cat-\((rank % categoryCount) + 1))"
     }
 
-    /// Everything folded together beyond the top values.
+    /// Everything folded together beyond the top values, and views with no
+    /// value for the breakdown.
     static let otherColor = "var(--cat-other)"
-    /// Views that have no value for the chosen breakdown.
-    static let unrecordedColor = "var(--cat-unrecorded)"
 
     static let css = """
     *{box-sizing:border-box}
@@ -62,7 +61,7 @@ enum DashboardTheme {
       --cat-7:#0e9fb5; --cat-8:#d03b3b; --cat-9:#7cb82f; --cat-10:#a86b3c; --cat-11:#5b6ee1; --cat-12:#c052c9;
       --cat-13:#86b6ef; --cat-14:#f6a57f; --cat-15:#74d3ae; --cat-16:#f3b3cc; --cat-17:#f5cb5c; --cat-18:#bda4fa;
       --cat-19:#6dcfdd; --cat-20:#ec8b8b; --cat-21:#b5dd7a; --cat-22:#d2a47f; --cat-23:#a3aef0; --cat-24:#e29be7;
-      --cat-other:#898781; --cat-unrecorded:#d6d5ce;
+      --cat-other:#898781;
     }
     @media (prefers-color-scheme:dark){
       :root:not([data-theme="light"]){
@@ -77,7 +76,7 @@ enum DashboardTheme {
         --cat-7:#1bb3c9; --cat-8:#e05252; --cat-9:#8bc34a; --cat-10:#b97a4b; --cat-11:#6f7fe8; --cat-12:#cd67d6;
         --cat-13:#184f95; --cat-14:#8f3a17; --cat-15:#0f6b4b; --cat-16:#8e3457; --cat-17:#8a5c00; --cat-18:#5b3fa8;
         --cat-19:#0e6f7e; --cat-20:#962f2f; --cat-21:#52802c; --cat-22:#7a4f2f; --cat-23:#3a47a3; --cat-24:#85368c;
-        --cat-other:#6f6e69; --cat-unrecorded:#3a3a37;
+        --cat-other:#6f6e69;
       }
     }
     body{margin:0;background:var(--page);color:var(--text-primary);

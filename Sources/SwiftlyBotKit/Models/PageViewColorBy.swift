@@ -66,12 +66,11 @@ struct PageViewBreakdown: Sendable, Equatable {
         enum Kind: Sendable, Equatable {
             /// A value of its own: a page, a country.
             case value
-            /// Every value beyond the top ones, or below the small-cell
-            /// threshold, together.
+            /// Every value beyond the top ones or below the small-cell
+            /// threshold, and every view with no value at all (counted
+            /// before the dimensions were recorded, or without a country
+            /// table), together.
             case other
-            /// Views with no value for the breakdown: counted before the
-            /// dimensions were recorded, or without a country table.
-            case unrecorded
         }
 
         let label: String
@@ -87,8 +86,7 @@ struct PageViewBreakdown: Sendable, Equatable {
     /// Whether these buckets are days though the range is hourly, because
     /// the breakdown is only stored per day.
     let isDailyFallback: Bool
-    /// Largest value first, then Other, then Not recorded. Empty series are
-    /// left out.
+    /// Largest value first, then Other. Empty series are left out.
     let series: [Series]
     /// Counts below this are shown as `<N` (dimensions only).
     let smallCellThreshold: Int?
@@ -109,7 +107,7 @@ struct PageViewBreakdown: Sendable, Equatable {
     /// ``maximumValues`` keep their own series; the rest, and any value whose
     /// total is under `smallCellThreshold`, are added to Other. `bucketTotals`,
     /// when given, is the page view count per bucket: whatever it holds beyond
-    /// the breakdown's own sum becomes Not recorded.
+    /// the breakdown's own sum is added to Other.
     static func build(
         colorBy: PageViewColorBy,
         buckets: [Date],
@@ -122,9 +120,21 @@ struct PageViewBreakdown: Sendable, Equatable {
         for row in rows where buckets.indices.contains(row.bucket) {
             perValue[row.value, default: Array(repeating: 0, count: buckets.count)][row.bucket] += row.count
         }
-        let ranked = perValue
-            .map { (label: $0.key, counts: $0.value, total: $0.value.reduce(0, +)) }
-            .sorted { $0.total != $1.total ? $0.total > $1.total : $0.label < $1.label }
+        // Spelled out: Swift 6.0 on Linux gives up type-checking the
+        // one-expression map and sort.
+        struct Ranked {
+            let label: String
+            let counts: [Int]
+            let total: Int
+        }
+        var ranked: [Ranked] = []
+        for (label, counts) in perValue {
+            ranked.append(Ranked(label: label, counts: counts, total: counts.reduce(0, +)))
+        }
+        ranked.sort { (a: Ranked, b: Ranked) -> Bool in
+            if a.total != b.total { return a.total > b.total }
+            return a.label < b.label
+        }
         var series: [Series] = []
         var other = Array(repeating: 0, count: buckets.count)
         for entry in ranked {
@@ -135,18 +145,16 @@ struct PageViewBreakdown: Sendable, Equatable {
                 for index in other.indices { other[index] += entry.counts[index] }
             }
         }
+        if let bucketTotals, bucketTotals.count == buckets.count {
+            for index in bucketTotals.indices {
+                var accounted = other[index]
+                for entry in series { accounted += entry.counts[index] }
+                other[index] += max(0, bucketTotals[index] - accounted)
+            }
+        }
         let otherTotal = other.reduce(0, +)
         if otherTotal > 0 {
             series.append(.init(label: "Other", kind: .other, total: otherTotal, counts: other))
-        }
-        if let bucketTotals, bucketTotals.count == buckets.count {
-            let unrecorded = bucketTotals.indices.map { index in
-                max(0, bucketTotals[index] - series.reduce(0) { $0 + $1.counts[index] })
-            }
-            let unrecordedTotal = unrecorded.reduce(0, +)
-            if unrecordedTotal > 0 {
-                series.append(.init(label: "Not recorded", kind: .unrecorded, total: unrecordedTotal, counts: unrecorded))
-            }
         }
         return PageViewBreakdown(colorBy: colorBy, buckets: buckets, isDailyFallback: isDailyFallback,
                                  series: series, smallCellThreshold: smallCellThreshold)
@@ -174,7 +182,6 @@ struct PageViewBreakdown: Sendable, Equatable {
         switch series[index].kind {
         case .value: return DashboardTheme.categoryColor(rank: index)
         case .other: return DashboardTheme.otherColor
-        case .unrecorded: return DashboardTheme.unrecordedColor
         }
     }
 
