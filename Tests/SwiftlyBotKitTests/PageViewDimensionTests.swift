@@ -277,6 +277,17 @@ final class PageViewColorByTests: XCTestCase {
         XCTAssertEqual(PageViewColorBy.options(dimensionsEnabled: true).count, 16)
     }
 
+    /// A section's index is in the section with or without its trailing slash.
+    func testSectionOfPath() {
+        let cases = [
+            ("/", "/"), ("/blog", "/blog/"), ("/blog/", "/blog/"),
+            ("/blog/some-article", "/blog/"), ("/blog/some-article/", "/blog/"), ("/newsletter", "/newsletter/"),
+        ]
+        for (path, section) in cases {
+            XCTAssertEqual(PageViewQueries.section(of: path), section, path)
+        }
+    }
+
     private let buckets = (0..<3).map { Date(timeIntervalSince1970: Double($0) * 86_400) }
 
     /// Ranked by total; small values, the overflow and the views the

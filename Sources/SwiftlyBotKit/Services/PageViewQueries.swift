@@ -351,15 +351,19 @@ struct PageViewQueries: Sendable {
 
     /// ``sectionExpression`` in Swift.
     static func section(of path: String) -> String {
+        guard path != "/" else { return path }
         let rest = path.dropFirst()
-        guard let slash = rest.firstIndex(of: "/") else { return path }
+        guard let slash = rest.firstIndex(of: "/") else { return path + "/" }
         return String(path[...slash])
     }
 
     /// The first path segment with its slashes, `/insights/` for
-    /// `/insights/some-article/`; a path with a single segment is itself.
+    /// `/insights/some-article/`. A path with a single segment gets the
+    /// trailing slash, so `/insights` and `/insights/` are one section;
+    /// `/` is itself.
     static let sectionExpression = """
-        CASE WHEN strpos(substr(path, 2), '/') = 0 THEN path \
+        CASE WHEN path = '/' THEN path \
+        WHEN strpos(substr(path, 2), '/') = 0 THEN path || '/' \
         ELSE substr(path, 1, strpos(substr(path, 2), '/') + 1) END
         """
 

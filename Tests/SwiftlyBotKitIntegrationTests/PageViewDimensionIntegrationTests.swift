@@ -125,6 +125,8 @@ final class PageViewBreakdownIntegrationTests: PostgresIntegrationTestCase {
         let facts = PageViewFacts.derive(headers: headers, query: nil, host: nil, clientIP: nil, countries: nil)
         for _ in 0..<6 { counter.record(siteKey: "a", path: "/blog/one/", facts: facts, at: now.addingTimeInterval(-3_600)) }
         for _ in 0..<2 { counter.record(siteKey: "a", path: "/blog/two/", facts: facts, at: now.addingTimeInterval(-3_600)) }
+        // The section's own index, without the trailing slash, is in the same section.
+        counter.record(siteKey: "a", path: "/blog", facts: facts, at: now.addingTimeInterval(-3_600))
         // Counted without dimensions: they land in Other.
         for _ in 0..<3 { counter.record(siteKey: "a", path: "/", at: now.addingTimeInterval(-7_200)) }
         await counter.flush()
@@ -132,10 +134,11 @@ final class PageViewBreakdownIntegrationTests: PostgresIntegrationTestCase {
         let queries = PageViewQueries(database: sql(), timeZone: TimeZone(secondsFromGMT: 0)!)
         let pagesResult = try await queries.breakdown(.page, range: .week, siteKey: "a", smallCellThreshold: 5, now: now)
         let pages = try XCTUnwrap(pagesResult)
-        XCTAssertEqual(pages.series.map(\.label), ["/blog/one/", "/", "/blog/two/"])
+        XCTAssertEqual(pages.series.map(\.label), ["/blog/one/", "/", "/blog/two/", "/blog"])
         let sectionsResult = try await queries.breakdown(.section, range: .day, siteKey: "a", smallCellThreshold: 5, now: now)
         let sections = try XCTUnwrap(sectionsResult)
         XCTAssertEqual(sections.series.map(\.label), ["/blog/", "/"])
+        XCTAssertEqual(sections.series.map(\.total), [9, 3])
         XCTAssertEqual(sections.buckets.count, 24)
         let topPages: [PageViewData.PageRow] = [.init(path: "/blog/one/", people: 6, agents: 0), .init(path: "/", people: 3, agents: 0)]
         let browsersResult = try await queries.breakdown(.dimension(.browser), range: .day, siteKey: "a",
@@ -144,7 +147,7 @@ final class PageViewBreakdownIntegrationTests: PostgresIntegrationTestCase {
         XCTAssertTrue(browsers.isDailyFallback)
         XCTAssertEqual(browsers.buckets.count, 2)
         XCTAssertEqual(browsers.series.map(\.label), ["Safari", "Other"])
-        XCTAssertEqual(browsers.series.map(\.total), [8, 3])
+        XCTAssertEqual(browsers.series.map(\.total), [9, 3])
         XCTAssertEqual(browsers.pageSplits["/blog/one/"], [6, 0])
         XCTAssertEqual(browsers.pageSplits["/"], [0, 3])
         let sectionSplit = try await queries.breakdown(.section, range: .week, siteKey: "a", smallCellThreshold: 5,
