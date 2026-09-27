@@ -368,14 +368,14 @@ struct PageViewQueries: Sendable {
         """
 
     /// When page views were first counted for this site (or any site).
-    private func firstCountedView(siteKey: String?) async throws -> Date? {
+    func firstCountedView(siteKey: String?) async throws -> Date? {
         var query: SQLQueryString = "SELECT MIN(bucket_start) AS first FROM page_view_counts WHERE TRUE"
         query += siteClause(siteKey)
         return try await database.raw(query).first()?.decode(column: "first", as: Date?.self)
     }
 
     /// Empty for the all-sites view.
-    private func siteClause(_ siteKey: String?) -> SQLQueryString {
+    func siteClause(_ siteKey: String?) -> SQLQueryString {
         guard let siteKey else { return "" }
         return " AND site_key = \(bind: siteKey)"
     }

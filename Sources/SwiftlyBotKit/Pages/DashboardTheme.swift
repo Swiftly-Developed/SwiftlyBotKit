@@ -122,6 +122,13 @@ enum DashboardTheme {
     /* Phones: the headline number takes a row, the other four pair up. */
     @media (max-width:520px){.tile.hero{grid-column:1/-1}}
     .tile .value.alert{color:var(--critical)}
+    .tile .delta{color:var(--muted);font-size:12px;margin-top:6px}
+    .tile .delta b{font-weight:650;color:var(--text-secondary);font-variant-numeric:tabular-nums}
+    .tile .delta.up.positive b{color:var(--good)}
+    .tile .delta.down.positive b{color:var(--critical)}
+    .tile-group .tiles{margin-bottom:18px}
+    .tile-group .group-label{font-size:12px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--text-secondary);margin:0 0 8px}
+    .tile-group:last-of-type .tiles{margin-bottom:24px}
 
     /* Cards */
     .card{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin-bottom:20px}

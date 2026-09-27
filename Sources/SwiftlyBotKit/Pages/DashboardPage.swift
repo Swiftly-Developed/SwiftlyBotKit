@@ -316,12 +316,58 @@ enum DashboardPage {
         value: String,
         note: String,
         isHero: Bool = false,
-        isAlert: Bool = false
+        isAlert: Bool = false,
+        delta: TileDelta? = nil
     ) -> some HTML {
         div(.class(isHero ? "tile hero" : "tile")) {
             div(.class("label")) { label }
             div(.class(isAlert ? "value alert" : "value")) { value }
             div(.class("note")) { note }
+            if let delta {
+                div(.class("delta \(delta.direction.rawValue) \(delta.tone.rawValue)")) {
+                    b { delta.text }
+                    " vs \(delta.period)"
+                }
+            }
+        }
+    }
+
+    /// How a tile's figure moved against the previous period: "▲ 12%",
+    /// "▼ 8%", "no change" or "new".
+    struct TileDelta: Sendable, Equatable {
+        enum Direction: String, Sendable { case up, down, flat, new }
+        /// Whether up is good news. AI agent traffic moving is neither.
+        enum Tone: String, Sendable { case positive, neutral }
+
+        let text: String
+        let direction: Direction
+        let tone: Tone
+        let period: String
+
+        init(_ now: Int, was: Int, period: String, tone: Tone) {
+            self.init(Double(now), was: Double(was), period: period, tone: tone)
+        }
+
+        init(_ now: Double, was: Double, period: String, tone: Tone) {
+            self.period = period
+            self.tone = tone
+            guard was > 0 else {
+                direction = now > 0 ? .new : .flat
+                text = now > 0 ? "new" : "no change"
+                return
+            }
+            let percent = (now - was) / was * 100
+            let rounded = Int(abs(percent).rounded())
+            if rounded == 0 {
+                direction = .flat
+                text = "no change"
+            } else if percent > 0 {
+                direction = .up
+                text = "\u{25B2} \(rounded)%"
+            } else {
+                direction = .down
+                text = "\u{25BC} \(rounded)%"
+            }
         }
     }
 

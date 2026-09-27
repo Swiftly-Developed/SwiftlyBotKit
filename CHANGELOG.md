@@ -30,6 +30,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   total for the period in its colour, and splits each most-read page the
   same way. Values under `dimensions.smallCellThreshold` (default 5), and
   views without a value, are counted in Other.
+- Time on page: `pageViews.timeOnPage` serves a script at `/_botkit/time.js`
+  that posts, once per page, the whole seconds it stayed visible to
+  `/_botkit/time`. Kept only from a browser, same-site, and for a page counted
+  in the last two days, capped at 30 minutes, and stored as counts and summed
+  seconds per site, day, page and duration band in a new table,
+  `page_view_durations`, registered with the page view tables. The Page views
+  tab shows the average, the median band, the share under ten seconds, the
+  spread over the bands and each most-read page's average.
+- The Page views tab has two rows of tiles, people and AI agents, whichever
+  audience is chosen: page views, per hour or day, unique pages, time on page
+  and arrivals from AI assistants; AI agent reads, unique IP addresses,
+  distinct agents, reads per hour or day and unique pages. Each count shows
+  its change against the previous period of the same length, or nothing when
+  counting began inside it.
+- With dimensions on, the Page views tab lists the top referrers, countries
+  and landing pages. Values under `smallCellThreshold` are folded together.
+- `BotKitConfigurationError.invalidTimeOnPagePath` for a beacon path that
+  cannot be mounted.
 
 ### Changed
 

@@ -6,7 +6,14 @@ Count how often people read each page, next to how often AI agents do, without s
 
 The AI agent numbers mean more with something to compare them to. A page that ChatGPT-User fetched forty times last week is a different story when people read it four hundred times than when they read it four. Page views give that comparison, in the same dashboard, without a second analytics product.
 
-They are off by default. When turned on, the dashboard gains a **Page views** tab at `<dashboard path>/pages/`, with the same site switcher and date ranges: total reads, pages read, a chart over time, and the most-read pages.
+They are off by default. When turned on, the dashboard gains a **Page views** tab at `<dashboard path>/pages/`, with the same site switcher and date ranges: tiles, a chart over time, and the most-read pages.
+
+The tiles come in two rows, whichever audience is chosen, the chosen one first:
+
+- **People**: page views, page views per hour (24-hour range) or day, unique pages, time on page (with ``BotKitConfiguration/PageViews/TimeOnPage`` on) and arrivals from AI assistants.
+- **AI agents**: reads, unique visitors (distinct IP hashes, so one crawler fleet counts as many), distinct agents, reads per hour or day, and unique pages.
+
+Each count shows its change against the previous period of the same length, the 24 hours or days just before the window. When counting began inside that previous period the change is left out, since a leap from zero would say nothing.
 
 An audience filter chooses whose reads the tab shows (`?audience=` in the URL, kept by every link on the tab):
 
@@ -90,10 +97,43 @@ The chart on the Page views tab has a **Color by** menu (`?color=`, kept by ever
 
 Values are ranked by their total in the period and drawn in up to 23 colours, largest at the baseline; the rest go into **Other**, together with page views that have no value for the dimension (counted before dimensions were switched on, or without a country table), so every bar still adds up to the page views. Under the chart, every value's total for the period is listed in its colour, and each page in **Most-read pages** is split the same way. Values with fewer views than ``BotKitConfiguration/PageViews/Dimensions/smallCellThreshold`` (default 5) are counted in Other, and counts under it are shown as `<5`.
 
+### Rankings
+
+With dimensions on, three lists follow the most-read pages: the top referrers (moves between the site's own pages left out), the top countries, and the top landing pages, the pages views arrived at with no previous page on the same site. Referrers and countries under ``BotKitConfiguration/PageViews/Dimensions/smallCellThreshold`` are folded into one line. They are daily counts, so on the 24-hour range they cover yesterday and today.
+
+### Time on page
+
+With ``BotKitConfiguration/PageViews/TimeOnPage`` on, BotKit serves a script at ``BotKitConfiguration/PageViews/TimeOnPage/scriptPath`` (`/_botkit/time.js` by default) for the site to include in every page:
+
+```html
+<script src="/_botkit/time.js" defer></script>
+```
+
+While the page is visible, the script adds up the time. The first time the reader leaves, closes the tab or switches away, it posts one beacon to ``BotKitConfiguration/PageViews/TimeOnPage/path``: the whole seconds and `location.pathname`, as plain text. A page that was never visible sends nothing. It sets no cookie, uses no storage and sends no identifier.
+
+The server answers `204` whatever it does with the beacon. It keeps the reading when the user agent reads as a browser (the same test page views use), the request is not cross-site, and this process counted a view of the page today or yesterday; a trailing slash is ignored when matching, and the reading is filed under the path the view was counted as. Readings are capped at 30 minutes, so a tab left open does not count as an afternoon of reading. They are summed in memory and written with the page views, into one table:
+
+| Column | Holds |
+|---|---|
+| `site_key`, `day`, `path` | as the dimension counters |
+| `band` | under 10 s, 10 to 30 s, 30 s to 1 min, 1 to 3 min, 3 to 10 min, 10 min or more |
+| `readings` | how many readings fell in the band |
+| `seconds` | their sum |
+
+The tab shows the average, the band holding the median, the share under ten seconds, the spread over the bands and, beside each most-read page, its average once five readings make one. The table, `page_view_durations`, is registered with the page view tables, so turning this on needs only the script tag.
+
+What it measures is time in view before the reader first leaves. Readers who block scripts, and readers of a site served by several processes whose beacon reaches one that has not counted that page, are not in it.
+
+```swift
+config.pageViews.isEnabled = true
+config.pageViews.timeOnPage.isEnabled = true
+```
+
 ### Privacy notices
 
-Whether a notice is required is a legal question for your jurisdiction, not something this package can settle. What it can tell you is exactly what is processed: the request headers above are read to decide whether to count, then discarded, and only the four columns are kept. With dimensions on, the IP address is briefly processed to look up the country, which in the EU is processing of personal data even though nothing is kept, so name it in your privacy notice (legitimate interest is the usual basis). Nothing is stored on the visitor's device.
+Whether a notice is required is a legal question for your jurisdiction, not something this package can settle. What it can tell you is exactly what is processed: the request headers above are read to decide whether to count, then discarded, and only the four columns are kept. With dimensions on, the IP address is briefly processed to look up the country, which in the EU is processing of personal data even though nothing is kept, so name it in your privacy notice (legitimate interest is the usual basis). Nothing is stored on the visitor's device. With time on page on, the script sends the page's address and a number of seconds; name that too.
 
 ## Topics
 
 - ``BotKitConfiguration/PageViews``
+- ``BotKitConfiguration/PageViews/TimeOnPage``

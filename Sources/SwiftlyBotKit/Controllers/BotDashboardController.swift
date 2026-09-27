@@ -107,6 +107,25 @@ struct BotDashboardController: RouteCollection {
                                                    pages: data.topPages)
             : nil
 
+        // The tiles for both audiences, against the previous period. The
+        // daily tables are read in the configured zone, like the breakdowns.
+        let dailyQueries = PageViewQueries(database: sql, timeZone: self.options.timeZone.foundationTimeZone)
+        let threshold = dimensions.effectiveSmallCellThreshold
+        var extras = PageViewsPage.Extras(smallCellThreshold: threshold)
+        extras.comparison = try await queries.comparison(range: range, siteKey: site?.key)
+        if config.pageViews.timeOnPage.isEnabled, audience.includesPeople {
+            extras.timeOnPage = try await dailyQueries.timeOnPage(range: range, siteKey: site?.key,
+                                                                  paths: data.topPages.map(\.path))
+        }
+        if dimensions.isEnabled, audience == .people {
+            extras.referrers = try await dailyQueries.ranking(.referrer, range: range, siteKey: site?.key,
+                                                              excluding: [ReferrerSummary.internal],
+                                                              smallCellThreshold: threshold)
+            extras.countries = try await dailyQueries.ranking(.country, range: range, siteKey: site?.key,
+                                                              smallCellThreshold: threshold)
+            extras.landingPages = try await dailyQueries.landingPages(range: range, siteKey: site?.key)
+        }
+
         return html(PageViewsPage.render(
             data: data,
             range: range,
@@ -117,7 +136,8 @@ struct BotDashboardController: RouteCollection {
             audience: audience,
             colorBy: colorBy,
             colorOptions: PageViewColorBy.options(dimensionsEnabled: dimensions.isEnabled),
-            breakdown: breakdown
+            breakdown: breakdown,
+            extras: extras
         ))
     }
 

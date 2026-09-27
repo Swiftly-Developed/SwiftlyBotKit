@@ -226,8 +226,11 @@ list: a link followed from API docs is not an assistant referral.
 
 Off by default. Turned on, every successful HTML page served to a browser adds
 one to a counter for its site, path and quarter-hour, and the dashboard gains a
-**Page views** tab at `/admin/ai-bots/pages/`: total reads, pages read, a chart,
-and the most-read pages. A filter switches between **People**, **AI agents**
+**Page views** tab at `/admin/ai-bots/pages/`: a row of tiles for people
+(page views, per hour or day, unique pages, arrivals from AI assistants) and one
+for AI agents (reads, unique IP addresses, distinct agents, per hour or day,
+unique pages), each with its change against the previous period of the same
+length, then a chart and the most-read pages. A filter switches between **People**, **AI agents**
 (successful page requests only; robots.txt, sitemaps and errors stay on the AI
 agents tab) and **Combined**, which stacks the two.
 
@@ -263,6 +266,7 @@ dashboard are skipped.
 | `flushInterval` | 10 seconds | How often the in-memory counts are written, in one statement. A killed process loses at most this much. |
 | `maximumPendingCounters` | `10_000` | Distinct site, path and quarter-hour counters held between writes. Beyond it new ones are dropped with a sampled warning. |
 | `dimensions` | off | Anonymous breakdowns, below. |
+| `timeOnPage` | off | Anonymous time on page, below. |
 
 ### Dimensions and Color by
 
@@ -282,6 +286,31 @@ The Page views chart then has a **Color by** menu that stacks every bar by
 page, section or any dimension, lists each value's total in its colour under
 the chart, and splits each of the most-read pages the same way. Values under
 `smallCellThreshold` (default 5) are counted in Other.
+
+With dimensions on, the tab also lists the top referrers, the top countries and
+the top landing pages (views with no previous page on the same site). Referrers
+and countries under `smallCellThreshold` are folded into one line.
+
+### Time on page
+
+`config.pageViews.timeOnPage.isEnabled = true` serves a small script at
+`/_botkit/time.js` (`timeOnPage.scriptPath`) for the site to include:
+
+```html
+<script src="/_botkit/time.js" defer></script>
+```
+
+While the page is visible it adds up the seconds, and the first time the reader
+leaves or switches away it posts one beacon, the whole seconds and
+`location.pathname`, to `/_botkit/time`. No cookie, storage or identifier.
+The server keeps a reading only from a browser user agent, not cross-site, and
+for a page it counted a view of today or yesterday (a trailing slash is ignored
+when matching), caps it at 30 minutes and adds it to `page_view_durations`:
+per site, day, page and duration band, a count and a sum of seconds. The tab
+then shows the average and median time on page, the share under ten seconds,
+the spread over six bands and each most-read page's average once five readings
+make one. The table is registered with the page view tables, so nothing else
+changes.
 
 ## Exporting to CSV
 

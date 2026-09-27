@@ -254,7 +254,7 @@ enum BotCharts {
     struct BarRow {
         let name: String
         /// Small grey text after the name: operator, or a page's extra detail.
-        let meta: String?
+        var meta: String?
         let value: Int
         /// Right-hand annotation, e.g. "18 verified".
         let note: String?
@@ -307,7 +307,8 @@ enum BotCharts {
         guard let peak = rows.map(\.value).max(), peak > 0 else { return "" }
         var html = "<div class=\"rows\">"
         for row in rows {
-            let share = max(1.5, Double(row.value) / Double(peak) * 100)
+            // A zero draws no bar; anything else at least a visible sliver.
+            let share = row.value > 0 ? max(1.5, Double(row.value) / Double(peak) * 100) : 0
             html += "<div class=\"row\" tabindex=\"-1\" style=\"--at:\(fmt(share))%\"><div class=\"head\"><div class=\"name\">\(escape(row.name))"
             if let meta = row.meta { html += "<span class=\"meta\"> \(escape(meta))</span>" }
             if let flag = row.flag { html += "<span class=\"tag bad\">\(escape(flag))</span>" }

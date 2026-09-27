@@ -27,7 +27,8 @@ enum PageViewsPage {
         audience: PageViewAudience = .people,
         colorBy: PageViewColorBy = .none,
         colorOptions: [PageViewColorBy] = [],
-        breakdown: PageViewBreakdown? = nil
+        breakdown: PageViewBreakdown? = nil,
+        extras: Extras = Extras()
     ) -> String {
         let siteName: String? = sites.count > 1 ? (selectedSite?.name ?? "All sites") : nil
         let base = options.basePath
@@ -53,14 +54,23 @@ enum PageViewsPage {
                     if data.total(for: audience) == 0 {
                         emptyState(range: range, audience: audience)
                     } else {
-                        tiles(data, range: range, audience: audience)
+                        if let comparison = extras.comparison {
+                            tileGroups(comparison, data: data, range: range, audience: audience,
+                                       timeOnPage: extras.timeOnPage)
+                        } else {
+                            tiles(data, range: range, audience: audience)
+                        }
                         chartCard(data, range: range, timeZone: timeZone, audience: audience,
                                   colorMenu: audience == .people && colorOptions.count > 1
                                       ? ColorMenu(current: colorBy, options: colorOptions, base: base,
                                                   siteKey: selectedSite?.key ?? "all", range: range)
                                       : nil,
                                   breakdown: breakdown)
-                        pagesCard(data.topPages, audience: audience, breakdown: breakdown)
+                        pagesCard(data.topPages, audience: audience, breakdown: breakdown,
+                                  timeOnPage: extras.timeOnPage, smallCellThreshold: extras.smallCellThreshold)
+                        if audience == .people {
+                            insightCards(extras)
+                        }
                     }
                     footnote(audience: audience)
                 }
@@ -69,7 +79,179 @@ enum PageViewsPage {
         return "<!DOCTYPE html>" + page.render()
     }
 
+    /// What the tab shows beyond the chart and the page list, each `nil`
+    /// when it is not loaded (the feature is off, or the audience does not
+    /// use it).
+    struct Extras: Sendable {
+        /// The tiles' figures and the previous period's. Without it the tab
+        /// shows the single row of tiles for the chosen audience.
+        var comparison: PageViewComparison?
+        var timeOnPage: TimeOnPageData?
+        var referrers: PageViewRanking?
+        var countries: PageViewRanking?
+        var landingPages: PageViewRanking?
+        /// Page averages from fewer readings than this are not shown.
+        var smallCellThreshold = 5
+
+        init(
+            comparison: PageViewComparison? = nil,
+            timeOnPage: TimeOnPageData? = nil,
+            referrers: PageViewRanking? = nil,
+            countries: PageViewRanking? = nil,
+            landingPages: PageViewRanking? = nil,
+            smallCellThreshold: Int = 5
+        ) {
+            self.comparison = comparison
+            self.timeOnPage = timeOnPage
+            self.referrers = referrers
+            self.countries = countries
+            self.landingPages = landingPages
+            self.smallCellThreshold = smallCellThreshold
+        }
+    }
+
     // MARK: - Tiles
+
+    /// Two rows of tiles, people and AI agents, whichever audience is
+    /// chosen, the chosen one first. Each count says how it moved against
+    /// the previous period of the same length.
+    @HTMLBuilder
+    static func tileGroups(
+        _ comparison: PageViewComparison,
+        data: PageViewData,
+        range: BotDateRange,
+        audience: PageViewAudience,
+        timeOnPage: TimeOnPageData?
+    ) -> some HTML {
+        if audience == .agents {
+            agentTiles(comparison, range: range, isFirst: true)
+            peopleTiles(comparison, data: data, range: range, timeOnPage: timeOnPage, isFirst: false)
+        } else {
+            peopleTiles(comparison, data: data, range: range, timeOnPage: timeOnPage, isFirst: true)
+            agentTiles(comparison, range: range, isFirst: false)
+        }
+    }
+
+    private static func peopleTiles(
+        _ comparison: PageViewComparison,
+        data: PageViewData,
+        range: BotDateRange,
+        timeOnPage: TimeOnPageData?,
+        isFirst: Bool
+    ) -> some HTML {
+        let now = comparison.current
+        let before = comparison.previous
+        let comparable = comparison.peopleComparable
+        let period = previousLabel(range)
+        let unit = range.isHourly ? "hour" : "day"
+        return section(.class("tile-group")) {
+            h2(.class("group-label")) { "People" }
+            div(.class("tiles")) {
+                DashboardPage.tile(
+                    label: "Page views",
+                    value: BotCharts.compact(now.peopleViews),
+                    note: "by people, \(range.label.lowercased())",
+                    isHero: isFirst,
+                    delta: comparable ? .init(now.peopleViews, was: before.peopleViews, period: period, tone: .positive) : nil
+                )
+                DashboardPage.tile(
+                    label: "Page views per \(unit)",
+                    value: average(views: now.peopleViews, buckets: data.peopleBucketCount),
+                    note: data.peopleCountedSince != nil ? "average since counting began" : "average over the window",
+                    delta: comparable
+                        ? .init(Double(now.peopleViews) / Double(max(1, data.peopleBucketCount)),
+                                was: Double(before.peopleViews) / Double(range.bucketCount),
+                                period: period, tone: .positive)
+                        : nil
+                )
+                DashboardPage.tile(
+                    label: "Unique pages",
+                    value: BotCharts.compact(now.peoplePages),
+                    note: "distinct pages people read",
+                    delta: comparable ? .init(now.peoplePages, was: before.peoplePages, period: period, tone: .positive) : nil
+                )
+                if let timeOnPage {
+                    DashboardPage.tile(
+                        label: "Time on page",
+                        value: timeOnPage.total.average.map(duration) ?? "\u{2013}",
+                        note: timeOnPageNote(timeOnPage)
+                    )
+                }
+                DashboardPage.tile(
+                    label: "From AI assistants",
+                    value: BotCharts.compact(now.referrals),
+                    note: "people who followed a link in an AI answer",
+                    delta: comparison.agentsComparable
+                        ? .init(now.referrals, was: before.referrals, period: period, tone: .positive) : nil
+                )
+            }
+        }
+    }
+
+    private static func agentTiles(_ comparison: PageViewComparison, range: BotDateRange, isFirst: Bool) -> some HTML {
+        let now = comparison.current
+        let before = comparison.previous
+        let comparable = comparison.agentsComparable
+        let period = previousLabel(range)
+        let unit = range.isHourly ? "hour" : "day"
+        return section(.class("tile-group")) {
+            h2(.class("group-label")) { "AI agents" }
+            div(.class("tiles")) {
+                DashboardPage.tile(
+                    label: "AI agent reads",
+                    value: BotCharts.compact(now.agentReads),
+                    note: agentRatio(views: now.peopleViews, agents: now.agentReads),
+                    isHero: isFirst,
+                    delta: comparable ? .init(now.agentReads, was: before.agentReads, period: period, tone: .neutral) : nil
+                )
+                DashboardPage.tile(
+                    label: "Unique visitors",
+                    value: BotCharts.compact(now.agentAddresses),
+                    note: "distinct IP addresses; one crawler can use many",
+                    delta: comparable ? .init(now.agentAddresses, was: before.agentAddresses, period: period, tone: .neutral) : nil
+                )
+                DashboardPage.tile(
+                    label: "Agents",
+                    value: BotCharts.compact(now.agents),
+                    note: "distinct AI agents, such as GPTBot",
+                    delta: comparable ? .init(now.agents, was: before.agents, period: period, tone: .neutral) : nil
+                )
+                DashboardPage.tile(
+                    label: "Reads per \(unit)",
+                    value: average(views: now.agentReads, buckets: range.bucketCount),
+                    note: "average over the window",
+                    delta: comparable ? .init(now.agentReads, was: before.agentReads, period: period, tone: .neutral) : nil
+                )
+                DashboardPage.tile(
+                    label: "Unique pages",
+                    value: BotCharts.compact(now.agentPages),
+                    note: "distinct pages AI agents read",
+                    delta: comparable ? .init(now.agentPages, was: before.agentPages, period: period, tone: .neutral) : nil
+                )
+            }
+        }
+    }
+
+    /// "previous 24 hours", "previous 7 days".
+    static func previousLabel(_ range: BotDateRange) -> String {
+        "previous " + range.label.dropFirst("Last ".count).lowercased()
+    }
+
+    /// "median 30 s to 1 min, 34% under 10 s".
+    static func timeOnPageNote(_ data: TimeOnPageData) -> String {
+        guard let median = data.medianBand, let glance = data.glanceShare else { return "no readings yet" }
+        var note = "median \(median.label.lowercased()), \(BotCharts.share(Int((glance * 1000).rounded()), of: 1000)) under 10 s"
+        if data.isDailyFallback { note += "; yesterday and today" }
+        return note
+    }
+
+    /// "45 s", "2 min 5 s", "12 min".
+    static func duration(_ seconds: Int) -> String {
+        if seconds < 60 { return "\(seconds) s" }
+        let minutes = seconds / 60, rest = seconds % 60
+        if minutes >= 10 || rest == 0 { return "\(minutes) min" }
+        return "\(minutes) min \(rest) s"
+    }
 
     private static func tiles(_ data: PageViewData, range: BotDateRange, audience: PageViewAudience) -> some HTML {
         let total = data.total(for: audience)
@@ -348,7 +530,9 @@ enum PageViewsPage {
     private static func pagesCard(
         _ pages: [PageViewData.PageRow],
         audience: PageViewAudience,
-        breakdown: PageViewBreakdown? = nil
+        breakdown: PageViewBreakdown? = nil,
+        timeOnPage: TimeOnPageData? = nil,
+        smallCellThreshold: Int = 5
     ) -> some HTML {
         div(.class("card")) {
             h2 { "Most-read pages" }
@@ -360,15 +544,22 @@ enum PageViewsPage {
                     } else {
                         "What people read, with the AI agent reads of the same page beside it."
                     }
+                    if timeOnPage != nil {
+                        " Beside a page's name, its average time on page, when \(smallCellThreshold) or more readings make one."
+                    }
                 case .agents: "What AI agents fetched, with the page views by people beside it."
                 case .combined: "Every read of each page, split into people and AI agents."
                 }
             }
             HTMLRaw(BotCharts.barRows(pages.map { page in
-                if audience == .people, let breakdown {
-                    return row(for: page, breakdown: breakdown)
+                var row = audience == .people && breakdown != nil
+                    ? row(for: page, breakdown: breakdown!)
+                    : row(for: page, audience: audience)
+                if audience.includesPeople, let sums = timeOnPage?.pages[page.path],
+                   sums.readings >= smallCellThreshold, let average = sums.average {
+                    row.meta = "\(duration(average)) on page"
                 }
-                return row(for: page, audience: audience)
+                return row
             }))
             if audience == .combined {
                 div(.class("legend")) {
@@ -446,6 +637,99 @@ enum PageViewsPage {
         }
     }
 
+    // MARK: - Time on page, referrers, countries, landing pages
+
+    @HTMLBuilder
+    private static func insightCards(_ extras: Extras) -> some HTML {
+        if let timeOnPage = extras.timeOnPage {
+            timeOnPageCard(timeOnPage)
+        }
+        if extras.referrers != nil || extras.countries != nil {
+            div(.class("cols")) {
+                if let referrers = extras.referrers {
+                    rankingCard(
+                        title: "Top referrers",
+                        hint: "The sites people came from. (direct) is a typed address, a bookmark or an app that sends no referrer; moves between your own pages are left out.",
+                        ranking: referrers, threshold: extras.smallCellThreshold, label: { $0 }
+                    )
+                }
+                if let countries = extras.countries {
+                    rankingCard(
+                        title: "Top countries",
+                        hint: "Looked up from the IP address in a local table, which is then dropped.",
+                        ranking: countries, threshold: extras.smallCellThreshold, label: countryName
+                    )
+                }
+            }
+        }
+        if let landing = extras.landingPages {
+            rankingCard(
+                title: "Top landing pages",
+                hint: "The first page people opened: views that did not come from another page on this site.",
+                ranking: landing, threshold: nil, label: { $0 }
+            )
+        }
+    }
+
+    private static func timeOnPageCard(_ data: TimeOnPageData) -> some HTML {
+        div(.class("card")) {
+            h2 { "Time on page" }
+            p(.class("hint")) {
+                "How long a page stayed in view before the reader left or switched away, from \(BotCharts.grouped(data.total.readings)) readings\(data.isDailyFallback ? " over yesterday and today (stored per day)" : ""). Readings are capped at 30 minutes and come from a script, so readers who block scripts are not in them."
+            }
+            if data.total.readings == 0 {
+                p(.class("hint")) { "No readings in this period yet." }
+            } else {
+                HTMLRaw(BotCharts.barRows(TimeOnPageBand.allCases.map { band in
+                    let count = data.bands[band.rawValue]
+                    return .init(name: band.label, meta: nil, value: count,
+                                 note: BotCharts.share(count, of: data.total.readings),
+                                 color: peopleColor, flag: nil)
+                }))
+            }
+        }
+    }
+
+    private static func rankingCard(
+        title: String,
+        hint: String,
+        ranking: PageViewRanking,
+        threshold: Int?,
+        label: @escaping (String) -> String
+    ) -> some HTML {
+        div(.class("card")) {
+            h2 { title }
+            p(.class("hint")) {
+                hint
+                if ranking.isDailyFallback { " Stored per day, so this covers yesterday and today." }
+            }
+            if ranking.total == 0 {
+                p(.class("hint")) { "Nothing recorded in this period." }
+            } else {
+                HTMLRaw(BotCharts.barRows(ranking.rows.map { row in
+                    .init(name: label(row.value), meta: nil, value: row.count,
+                          note: BotCharts.share(row.count, of: ranking.total),
+                          color: peopleColor, flag: nil)
+                } + (ranking.folded > 0 ? [
+                    .init(name: threshold.map { "Others (fewer than \($0) views each)" } ?? "Others",
+                          meta: nil, value: ranking.folded,
+                          note: BotCharts.share(ranking.folded, of: ranking.total),
+                          color: "var(--cat-other)", flag: nil)
+                ] : [])))
+            }
+        }
+    }
+
+    /// "Belgium" for `BE`, "Unknown" for `ZZ`, the code itself when the
+    /// platform has no name for it.
+    static func countryName(_ code: String) -> String {
+        if code == "ZZ" { return "Unknown" }
+        guard code.count == 2, code.allSatisfy({ $0.isASCII && $0.isUppercase }),
+              let name = Locale(identifier: "en_US").localizedString(forRegionCode: code), !name.isEmpty
+        else { return code }
+        return name
+    }
+
     // MARK: - Empty state and footnote
 
     private static func emptyState(range: BotDateRange, audience: PageViewAudience) -> some HTML {
@@ -468,7 +752,7 @@ enum PageViewsPage {
 
     private static func footnote(audience: PageViewAudience) -> some HTML {
         p(.class("sub")) {
-            "People: counted without cookies and without storing anything about the visitor (no IP address, no user agent, no full referrer); each view adds one to a counter for its page and quarter-hour and, for the Color by breakdowns, to daily counters of coarse values such as the country or the referring site, and only successful HTML pages opened in a browser count. These are views, not visitors. AI agents: successful page requests by agents in the catalog; robots.txt, sitemaps and errors are on the AI agents tab. Other bots appear in neither."
+            "People: counted without cookies and without storing anything about the visitor (no IP address, no user agent, no full referrer); each view adds one to a counter for its page and quarter-hour and, for the Color by breakdowns, to daily counters of coarse values such as the country or the referring site, and only successful HTML pages opened in a browser count. These are views, not visitors. Time on page, when on, comes from a script that reports one number of seconds per page with no identifier. AI agents: successful page requests by agents in the catalog, their unique visitors counted by keyed IP hash; robots.txt, sitemaps and errors are on the AI agents tab. Other bots appear in neither."
         }
     }
 }
