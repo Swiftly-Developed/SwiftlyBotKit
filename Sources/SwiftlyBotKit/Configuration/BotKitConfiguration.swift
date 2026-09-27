@@ -335,17 +335,23 @@ extension BotKitConfiguration {
         /// ``isEnabled`` as well.
         public var dimensions: Dimensions
 
+        /// How long people keep each page in view, reported by a small script
+        /// the site includes. Off by default; needs ``isEnabled`` as well.
+        public var timeOnPage: TimeOnPage
+
         /// Creates a page view configuration.
         public init(
             isEnabled: Bool = false,
             flushInterval: TimeInterval = 10,
             maximumPendingCounters: Int = 10_000,
-            dimensions: Dimensions = .default
+            dimensions: Dimensions = .default,
+            timeOnPage: TimeOnPage = .default
         ) {
             self.isEnabled = isEnabled
             self.flushInterval = flushInterval
             self.maximumPendingCounters = maximumPendingCounters
             self.dimensions = dimensions
+            self.timeOnPage = timeOnPage
         }
     }
 }
@@ -423,6 +429,63 @@ extension BotKitConfiguration.PageViews {
 
         /// ``smallCellThreshold`` with its floor applied.
         public var effectiveSmallCellThreshold: Int { max(3, smallCellThreshold) }
+    }
+
+    /// Anonymous time on page: how long each page stayed in view.
+    ///
+    /// The site includes one script, served by BotKit at ``scriptPath``
+    /// (`<script src="/_botkit/time.js" defer></script>` with the default
+    /// ``path``). While the page is visible it adds up the seconds, and the
+    /// first time the reader leaves or switches away it sends one beacon with
+    /// that number and the page's path to ``path``. Nothing is stored in the
+    /// browser and the beacon carries no identifier.
+    ///
+    /// The server keeps only counters: per site, day, page and duration band,
+    /// how many readings fell in the band and their summed seconds, in
+    /// `page_view_durations`. The bands are under 10 s, 10 to 30 s, 30 s to
+    /// 1 min, 1 to 3 min, 3 to 10 min and 10 min or more. A reading is capped
+    /// at 30 minutes, and one for a page this process has not counted a view
+    /// of today or yesterday is dropped, so the beacon cannot be used to
+    /// invent paths.
+    ///
+    /// The table is registered with the page view tables, so turning this on
+    /// needs no other change than the script tag.
+    public struct TimeOnPage: Sendable, Equatable {
+
+        /// Time on page off.
+        public static let `default` = TimeOnPage()
+
+        /// Serve the script and accept its beacons. Default `false`.
+        public var isEnabled: Bool
+
+        /// Where the beacon is posted. The script is served at this path with
+        /// `.js` appended (``scriptPath``). Letters, digits, `-`, `.`, `_` and
+        /// `~` in each segment. Default `/_botkit/time`.
+        public var path: String
+
+        /// The most distinct site, day, page and band counters held in memory
+        /// between writes. Beyond it further readings are dropped with a
+        /// warning. Values below 1 count as 1. Default `20_000`.
+        public var maximumPendingCounters: Int
+
+        /// Creates a time on page configuration.
+        public init(isEnabled: Bool = false, path: String = "/_botkit/time", maximumPendingCounters: Int = 20_000) {
+            self.isEnabled = isEnabled
+            self.path = path
+            self.maximumPendingCounters = maximumPendingCounters
+        }
+
+        /// ``path`` with one leading slash and no trailing one.
+        public var normalizedPath: String {
+            "/" + pathComponents.joined(separator: "/")
+        }
+
+        /// Where the script is served: ``normalizedPath`` plus `.js`.
+        public var scriptPath: String { normalizedPath + ".js" }
+
+        var pathComponents: [String] {
+            path.split(separator: "/").map(String.init)
+        }
     }
 }
 

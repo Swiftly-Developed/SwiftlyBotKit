@@ -47,6 +47,10 @@ public enum BotKitConfigurationError: Error, Sendable, Equatable, CustomStringCo
     /// one of ``BotKitConfiguration/sites``.
     case unknownSignInLogoSite(String)
 
+    /// ``BotKitConfiguration/PageViews/TimeOnPage/path`` cannot be mounted
+    /// as given (path, reason).
+    case invalidTimeOnPagePath(String, reason: String)
+
     /// A description of what is wrong and how to fix it.
     public var description: String {
         switch self {
@@ -64,6 +68,8 @@ public enum BotKitConfigurationError: Error, Sendable, Equatable, CustomStringCo
             return "Invalid BotKit sign-in logo URL \(String(url.prefix(120)).debugDescription): use a root-relative path such as /images/logo.png, an absolute https URL, or a data:image/ URL, without quotes, spaces or angle brackets."
         case .unknownSignInLogoSite(let key):
             return "The BotKit sign-in logo for site \(key.debugDescription) would never be shown: no site in BotKitConfiguration.sites has that key. Use a key from sites, as siteKey returns it."
+        case .invalidTimeOnPagePath(let path, let reason):
+            return "Invalid BotKit time on page path \(path.debugDescription): \(reason)"
         case .pageViewsNotMigrated:
             return "BotKit page views are enabled, but BotKit.configure(for:database:pageViews:) was called without pageViews: true, so their table is never created. Pass pageViews: true there, or use BotKit.install(on:config:)."
         case .pageViewDimensionsNotMigrated:
@@ -88,6 +94,9 @@ extension BotKitConfiguration {
         if let site = sites.first(where: { $0.key == Self.reservedAllSitesKey }) {
             throw BotKitConfigurationError.reservedSiteKey(site.key)
         }
+        if pageViews.isEnabled, pageViews.timeOnPage.isEnabled {
+            try pageViews.timeOnPage.validatePath(dashboardPath: dashboard.normalizedPath)
+        }
     }
 
     /// The keys that appear more than once in ``sites``.
@@ -97,6 +106,30 @@ extension BotKitConfiguration {
             duplicates.append(site.key)
         }
         return duplicates
+    }
+}
+
+extension BotKitConfiguration.PageViews.TimeOnPage {
+
+    func validatePath(dashboardPath: String) throws {
+        let components = pathComponents
+        guard !components.isEmpty else {
+            throw BotKitConfigurationError.invalidTimeOnPagePath(path, reason: "the beacon cannot be posted to the root. Use a path such as /_botkit/time.")
+        }
+        let allowed = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~".unicodeScalars)
+        for component in components {
+            if component == "." || component == ".." {
+                throw BotKitConfigurationError.invalidTimeOnPagePath(path, reason: "\".\" and \"..\" segments are resolved away by browsers.")
+            }
+            if let bad = component.unicodeScalars.first(where: { !allowed.contains($0) }) {
+                throw BotKitConfigurationError.invalidTimeOnPagePath(
+                    path, reason: "the character \(String(bad).debugDescription) is not allowed. Use only letters, digits, \"-\", \".\", \"_\" and \"~\" in each segment."
+                )
+            }
+        }
+        if normalizedPath == dashboardPath || normalizedPath.hasPrefix(dashboardPath + "/") {
+            throw BotKitConfigurationError.invalidTimeOnPagePath(path, reason: "it is inside the dashboard, which is behind the sign-in.")
+        }
     }
 }
 

@@ -48,7 +48,9 @@ public enum BotKit {
     /// database as ``BotKitConfiguration/database``.
     ///
     /// With `pageViews` set, it also registers the `page_view_counts` table
-    /// that ``BotKitConfiguration/PageViews`` writes to. Pass `true` exactly
+    /// that ``BotKitConfiguration/PageViews`` writes to, and the
+    /// `page_view_durations` table ``BotKitConfiguration/PageViews/TimeOnPage``
+    /// writes to when it is on. Pass `true` exactly
     /// when `config.pageViews.isEnabled` is; ``configureRoutes(for:config:)``
     /// throws when counting is on and its table was not registered here.
     ///
@@ -73,6 +75,7 @@ public enum BotKit {
         app.migrations.add(CreateAIBotVisit(), to: database)
         if pageViews {
             app.migrations.add(CreatePageViewCounts(), to: database)
+            app.migrations.add(CreatePageViewDurations(), to: database)
         }
         let dimensions = pageViews && pageViewDimensions
         if dimensions {
@@ -180,6 +183,14 @@ public enum BotKit {
             ))
             app.lifecycle.use(PageViewLifecycle(counter: counter))
             app.storage[PageViewCounterKey.self] = counter
+            if config.pageViews.timeOnPage.isEnabled {
+                try app.register(collection: TimeOnPageController(
+                    configuration: config.pageViews.timeOnPage,
+                    counter: counter,
+                    agents: runtime.classifier.agents,
+                    siteKey: config.siteKey
+                ))
+            }
         }
 
         guard config.dashboard.isEnabled else { return }

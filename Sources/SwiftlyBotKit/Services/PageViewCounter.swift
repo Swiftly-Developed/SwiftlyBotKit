@@ -310,6 +310,9 @@ final class PageViewCounter: @unchecked Sendable {
     let tally: PageViewTally
     let dimensionTally: CountTally<PageViewDimensionKey>?
     let pairTally: CountTally<PageViewPairKey>?
+    /// With time on page on: its readings, and the pages a reading may name.
+    let timeOnPageTally: TimeOnPageTally?
+    let knownPaths: KnownPagePaths?
     let campaignCap: CampaignValueCap
     /// The zone a view's day is taken in: the dashboard's.
     let timeZone: TimeZone
@@ -342,6 +345,11 @@ final class PageViewCounter: @unchecked Sendable {
             ? CountTally(maximumKeys: dimensions.maximumPendingDimensionCounters) : nil
         self.pairTally = dimensions.isEnabled
             ? CountTally(maximumKeys: dimensions.maximumPendingPairCounters) : nil
+        let timeOnPage = configuration.timeOnPage
+        self.timeOnPageTally = timeOnPage.isEnabled
+            ? TimeOnPageTally(maximumKeys: timeOnPage.maximumPendingCounters) : nil
+        self.knownPaths = timeOnPage.isEnabled
+            ? KnownPagePaths(maximumPerDay: configuration.maximumPendingCounters) : nil
         self.campaignCap = CampaignValueCap(maximum: dimensions.maximumCampaignValuesPerDay)
         self.timeZone = timeZone
         self.database = database
@@ -365,7 +373,42 @@ final class PageViewCounter: @unchecked Sendable {
             recordDimensions(facts, siteKey: siteKey, path: path, date: date,
                              dimensionTally: dimensionTally, pairTally: pairTally)
         }
+        knownPaths?.insert(siteKey: siteKey, path: path, day: PageViewDay(date, in: timeZone))
         startLoopIfNeeded()
+    }
+
+    /// Adds one time on page reading, when time on page is on and this
+    /// process counted a view of `path` today or yesterday. Returns whether
+    /// it was kept.
+    ///
+    /// A trailing slash is ignored when matching: an app that rewrites
+    /// `/about/` to `/about` before routing counts the view as `/about`
+    /// while the browser reports `/about/`. The reading is stored under the
+    /// path the view was counted as, so the two line up on the dashboard.
+    @discardableResult
+    func recordTimeOnPage(siteKey: String, path: String, seconds: Int, at date: Date = Date()) -> Bool {
+        guard let timeOnPageTally, let knownPaths else { return false }
+        let siteKey = BotTrafficRecorder.storable(siteKey)
+        let day = PageViewDay(date, in: timeZone)
+        var candidates = [BotTrafficRecorder.storable(path)]
+        if path.count > 1 {
+            candidates.append(BotTrafficRecorder.storable(path.hasSuffix("/") ? String(path.dropLast()) : path + "/"))
+        }
+        guard let path = candidates.first(where: { knownPaths.contains(siteKey: siteKey, path: $0, day: day) }) else {
+            return false
+        }
+        let seconds = min(max(0, seconds), TimeOnPageBand.maximumSeconds)
+        let key = TimeOnPageKey(siteKey: siteKey, day: day, path: path, band: TimeOnPageBand(seconds: seconds))
+        if let dropped = timeOnPageTally.add(key, seconds: seconds) {
+            if dropped == 1 || dropped % 1000 == 0 {
+                logger.warning(
+                    "Dropped a time on page reading: \(timeOnPageTally.maximumKeys) counters are already waiting to be written (\(dropped) dropped so far). Raise pageViews.timeOnPage.maximumPendingCounters or check the database."
+                )
+            }
+            return false
+        }
+        startLoopIfNeeded()
+        return true
     }
 
     private func recordDimensions(
@@ -425,6 +468,7 @@ final class PageViewCounter: @unchecked Sendable {
             lost += tally.restore(tally.drain())
             if let dimensionTally { lost += dimensionTally.restore(dimensionTally.drain()) }
             if let pairTally { lost += pairTally.restore(pairTally.drain()) }
+            if let timeOnPageTally { lost += timeOnPageTally.restore(timeOnPageTally.drain()) }
             if tally.pendingKeys > 0 || lost > 0, shouldReportMissingDatabase() {
                 logger.error(
                     "Page views are enabled but no SQL database is registered for BotKit, so counts are held in memory and not written\(lost > 0 ? " (\(lost) dropped)" : ""). This is logged once."
@@ -440,6 +484,52 @@ final class PageViewCounter: @unchecked Sendable {
         if let pairTally {
             await flush(pairTally, what: "page view pair counts", to: database, write: Self.writePairs)
         }
+        if let timeOnPageTally {
+            await flushTimeOnPage(timeOnPageTally, to: database)
+        }
+    }
+
+    private func flushTimeOnPage(_ tally: TimeOnPageTally, to database: any SQLDatabase) async {
+        let pending = tally.drain()
+        guard !pending.isEmpty else { return }
+        let entries = Array(pending)
+        var start = 0
+        while start < entries.count {
+            let chunk = entries[start..<min(start + Self.rowsPerStatement, entries.count)]
+            do {
+                try await Self.writeDurations(chunk, to: database)
+            } catch {
+                let unwritten = Dictionary(uniqueKeysWithValues: entries[start...].map { ($0.key, $0.value) })
+                let lost = tally.restore(unwritten)
+                logger.warning(
+                    "Could not write time on page readings; they are kept for the next attempt\(lost > 0 ? " except \(lost) that no longer fit" : ""): \(error)"
+                )
+                return
+            }
+            start += Self.rowsPerStatement
+        }
+    }
+
+    private static func writeDurations(
+        _ chunk: ArraySlice<(key: TimeOnPageKey, value: TimeOnPageTally.Sums)>,
+        to database: any SQLDatabase
+    ) async throws {
+        let sites = chunk.map { $0.key.siteKey }
+        let days = chunk.map { $0.key.day.isoDate }
+        let paths = chunk.map { $0.key.path }
+        let bands = chunk.map { $0.key.band.rawValue }
+        let readings = chunk.map { $0.value.readings }
+        let seconds = chunk.map { $0.value.seconds }
+        try await database.raw("""
+            INSERT INTO page_view_durations (site_key, day, path, band, readings, seconds)
+            SELECT site_key, day::date, path, band::smallint, readings, seconds FROM unnest(
+                \(bind: sites)::text[], \(bind: days)::text[], \(bind: paths)::text[],
+                \(bind: bands)::bigint[], \(bind: readings)::bigint[], \(bind: seconds)::bigint[]
+            ) AS t(site_key, day, path, band, readings, seconds)
+            ON CONFLICT (site_key, day, path, band)
+            DO UPDATE SET readings = page_view_durations.readings + EXCLUDED.readings,
+                          seconds = page_view_durations.seconds + EXCLUDED.seconds
+            """).run()
     }
 
     private func flush<Key>(

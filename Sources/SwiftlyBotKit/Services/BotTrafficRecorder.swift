@@ -22,6 +22,9 @@ struct BotRequestClassifier: Sendable {
     let recording: BotKitConfiguration.Recording
     /// Always excluded from recording, whether or not the dashboard is mounted.
     let dashboardPath: String
+    /// The time on page beacon and script, when they are served: machinery,
+    /// not pages.
+    let timeOnPagePaths: Set<String>
 
     init(configuration: BotKitConfiguration) {
         self.agents = AIAgentMatcher(
@@ -34,6 +37,9 @@ struct BotRequestClassifier: Sendable {
         )
         self.recording = configuration.recording
         self.dashboardPath = configuration.dashboard.normalizedPath
+        let timeOnPage = configuration.pageViews.timeOnPage
+        self.timeOnPagePaths = configuration.pageViews.isEnabled && timeOnPage.isEnabled
+            ? [timeOnPage.normalizedPath, timeOnPage.scriptPath] : []
     }
 
     /// The agent this request claims to be, when agent recording is on.
@@ -72,6 +78,7 @@ struct BotRequestClassifier: Sendable {
             return true
         }
         if isDashboardPath(path) || isDashboardPath(decodedOrRaw) { return true }
+        if timeOnPagePaths.contains(path) || timeOnPagePaths.contains(decodedOrRaw) { return true }
         // Documented as plain string prefixes: `/healthz` also covers
         // `/healthzcheck`. Checked against the slash-collapsed path, so
         // `//healthz` cannot slip past.
