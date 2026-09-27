@@ -46,6 +46,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Building one is unchanged; a `switch` that binds `.image(let url, let alt)`
   needs a third binding, such as `.image(let url, let alt, _)`.
 
+### Fixed
+
+- Builds on Linux against swift-crypto 3.x. `BotSigner` stored a
+  `SymmetricKey`, which is `Sendable` in CryptoKit and swift-crypto 4 but not
+  in swift-crypto 3, so an app whose other dependencies hold swift-crypto
+  below 4 failed to compile with "stored property 'key' of
+  'Sendable'-conforming struct 'BotSigner' has non-Sendable type
+  'SymmetricKey'". It now stores the secret's bytes.
+
 ## [0.6.0] - 2026-09-26
 
 ### Added

@@ -9,7 +9,12 @@ import Vapor
 /// prefixed message (`bot-dashboard:`, `credential:`, `ip:`, ...), so a value
 /// produced for one purpose is never valid for another.
 struct BotSigner: Sendable {
-    private let key: SymmetricKey
+    /// The secret's bytes, not a `SymmetricKey`: the key is `Sendable` in
+    /// CryptoKit and swift-crypto 4 but not in swift-crypto 3, which an app's
+    /// other dependencies may hold it to, so storing one breaks this type's
+    /// `Sendable` conformance on Linux there. The key is built per signature,
+    /// which costs a copy of a few dozen bytes.
+    private let keyBytes: Data
 
     /// Secrets shorter than this many bytes are logged as weak: a captured
     /// session cookie is a known message plus its HMAC, so a short key can be
@@ -17,7 +22,7 @@ struct BotSigner: Sendable {
     static let recommendedSecretLength = 32
 
     init(secret: String) {
-        self.key = SymmetricKey(data: Data(secret.utf8))
+        self.keyBytes = Data(secret.utf8)
     }
 
     // MARK: Dashboard session cookie
@@ -94,7 +99,7 @@ struct BotSigner: Sendable {
     // MARK: Primitives
 
     private func sign(_ message: String) -> String {
-        let code = HMAC<SHA256>.authenticationCode(for: Data(message.utf8), using: key)
+        let code = HMAC<SHA256>.authenticationCode(for: Data(message.utf8), using: SymmetricKey(data: keyBytes))
         return code.map { String(format: "%02x", $0) }.joined()
     }
 
