@@ -104,7 +104,7 @@ Add the package to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Swiftly-Developed/SwiftlyBotKit.git", from: "0.6.0"),
+    .package(url: "https://github.com/Swiftly-Developed/SwiftlyBotKit.git", from: "0.10.0"),
 ],
 ```
 

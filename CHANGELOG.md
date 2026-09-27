@@ -7,29 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-27
+
 ### Added
 
-- A sign-in logo per site: `dashboard.signInPage.siteLogos`, keyed by what
-  `siteKey` returns, replaces `logo` on the site the sign-in page is opened
-  on. The alt text defaults to that site's name. With `sites` configured, a
-  key that is not one of them throws `unknownSignInLogoSite` at install.
-- A dark-mode logo: `SignInLogo.image(url:altText:darkURL:)` shows `darkURL`
-  when the visitor's system is dark. Every absolute logo URL, per site and
-  dark, has its origin added to `img-src`.
-- Page view dimensions: `pageViews.dimensions` breaks each counted view down
-  by 13 coarse values (country, referring host, previous page, four `utm_`
-  tags, device type, browser and version, OS and version, language), derived
-  in memory and stored only as per-day counts in two new tables,
-  `page_view_dimension_counts` and `page_view_pair_counts`. The country comes
-  from a local table built by `Scripts/update-country-database.py`
-  (`CountryLookup`, `countryDatabasePath`); the IP never leaves the process.
-  Apps that register migrations themselves pass `pageViewDimensions: true` to
-  `BotKit.configure(for:database:pageViews:pageViewDimensions:)`.
-- A "Color by" menu on the Page views chart (`?color=`): stacks every bar by
-  page, section or any dimension in a 24-colour palette, lists each value's
-  total for the period in its colour, and splits each most-read page the
-  same way. Values under `dimensions.smallCellThreshold` (default 5), and
-  views without a value, are counted in Other.
 - Time on page: `pageViews.timeOnPage` serves a script at `/_botkit/time.js`
   that posts, once per page, the whole seconds it stayed visible to
   `/_botkit/time`. Kept only from a browser, same-site, and for a page counted
@@ -49,6 +30,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `BotKitConfigurationError.invalidTimeOnPagePath` for a beacon path that
   cannot be mounted.
 
+### Fixed
+
+- A bar row whose value is zero no longer draws a sliver of bar.
+
+## [0.9.2] - 2026-09-27
+
+### Fixed
+
+- Builds on Linux against swift-crypto 3.x. `BotSigner` stored a
+  `SymmetricKey`, which is `Sendable` in CryptoKit and swift-crypto 4 but not
+  in swift-crypto 3, so an app whose other dependencies hold swift-crypto
+  below 4 failed to compile with "stored property 'key' of
+  'Sendable'-conforming struct 'BotSigner' has non-Sendable type
+  'SymmetricKey'". It now stores the secret's bytes.
+
+## [0.9.1] - 2026-09-26
+
+### Fixed
+
+- **Section** in the Color by menu counts a section's own index page in its
+  section: `/insights` and `/insights/` both belong to `/insights/`, where
+  `/insights` used to be a section of its own.
+
+## [0.9.0] - 2026-09-26
+
+### Added
+
+- Page view dimensions: `pageViews.dimensions` breaks each counted view down
+  by 13 coarse values (country, referring host, previous page, four `utm_`
+  tags, device type, browser and version, OS and version, language), derived
+  in memory and stored only as per-day counts in two new tables,
+  `page_view_dimension_counts` and `page_view_pair_counts`. The country comes
+  from a local table built by `Scripts/update-country-database.py`
+  (`CountryLookup`, `countryDatabasePath`); the IP never leaves the process.
+  Apps that register migrations themselves pass `pageViewDimensions: true` to
+  `BotKit.configure(for:database:pageViews:pageViewDimensions:)`.
+- A "Color by" menu on the Page views chart (`?color=`): stacks every bar by
+  page, section or any dimension in a 24-colour palette, lists each value's
+  total for the period in its colour, and splits each most-read page the
+  same way. Values under `dimensions.smallCellThreshold` (default 5), and
+  views without a value, are counted in Other.
+
+## [0.8.0] - 2026-09-26
+
+### Added
+
+- A sign-in logo per site: `dashboard.signInPage.siteLogos`, keyed by what
+  `siteKey` returns, replaces `logo` on the site the sign-in page is opened
+  on. The alt text defaults to that site's name. With `sites` configured, a
+  key that is not one of them throws `unknownSignInLogoSite` at install.
+- A dark-mode logo: `SignInLogo.image(url:altText:darkURL:)` shows `darkURL`
+  when the visitor's system is dark. Every absolute logo URL, per site and
+  dark, has its origin added to `img-src`.
+
+### Changed
+
+- **Breaking:** `SignInLogo.image` has a third associated value, `darkURL`.
+  Building one is unchanged; a `switch` that binds `.image(let url, let alt)`
+  needs a third binding, such as `.image(let url, let alt, _)`.
+
+## [0.7.0] - 2026-09-26
+
 ### Changed
 
 - The dashboard, page views and export are drawn in the time zone of the
@@ -60,18 +103,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   zone actually used.
 - **The `Content-Security-Policy` now has a `script-src`** allowing that one
   script by its SHA-256 hash, and nothing else.
-- **Breaking:** `SignInLogo.image` has a third associated value, `darkURL`.
-  Building one is unchanged; a `switch` that binds `.image(let url, let alt)`
-  needs a third binding, such as `.image(let url, let alt, _)`.
-
-### Fixed
-
-- Builds on Linux against swift-crypto 3.x. `BotSigner` stored a
-  `SymmetricKey`, which is `Sendable` in CryptoKit and swift-crypto 4 but not
-  in swift-crypto 3, so an app whose other dependencies hold swift-crypto
-  below 4 failed to compile with "stored property 'key' of
-  'Sendable'-conforming struct 'BotSigner' has non-Sendable type
-  'SymmetricKey'". It now stores the secret's bytes.
 
 ## [0.6.0] - 2026-09-26
 
@@ -339,7 +370,13 @@ Initial public release.
   agents.
 - `Scripts/generate-ai-agent-catalog.py` to regenerate the catalog.
 
-[Unreleased]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.6.0...HEAD
+[Unreleased]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.10.0...HEAD
+[0.10.0]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.9.2...0.10.0
+[0.9.2]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.9.1...0.9.2
+[0.9.1]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.9.0...0.9.1
+[0.9.0]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.8.0...0.9.0
+[0.8.0]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.7.0...0.8.0
+[0.7.0]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.6.0...0.7.0
 [0.6.0]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.5.0...0.6.0
 [0.5.0]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.4.0...0.5.0
 [0.4.0]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.3.0...0.4.0
