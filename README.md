@@ -85,8 +85,8 @@ shrinking its labels:
 
 <img alt="The dashboard at phone width." src=".github/assets/mobile-light.png" width="320">
 
-Screenshots are from [`Examples/QuickStart`](Examples/QuickStart) with sample
-data.
+Screenshots are from [`Examples/QuickStart`](Examples/QuickStart) with page
+views, dimensions and time on page switched on, and sample data.
 
 ## Requirements
 
@@ -230,7 +230,12 @@ one to a counter for its site, path and quarter-hour, and the dashboard gains a
 (page views, per hour or day, unique pages, arrivals from AI assistants) and one
 for AI agents (reads, unique IP addresses, distinct agents, per hour or day,
 unique pages), each with its change against the previous period of the same
-length, then a chart and the most-read pages. A filter switches between **People**, **AI agents**
+length, then a chart and the most-read pages.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/page-views-dark.png">
+  <img alt="The Page views tab: a row of tiles for people (page views, per day, unique pages, time on page, arrivals from AI assistants) and one for AI agents (reads, unique visitors, agents, reads per day, unique pages), each with its change against the previous 30 days, above a daily chart of page views coloured by referrer." src=".github/assets/page-views-light.png">
+</picture> A filter switches between **People**, **AI agents**
 (successful page requests only; robots.txt, sitemaps and errors stay on the AI
 agents tab) and **Combined**, which stacks the two.
 
@@ -311,6 +316,11 @@ then shows the average and median time on page, the share under ten seconds,
 the spread over six bands and each most-read page's average once five readings
 make one. The table is registered with the page view tables, so nothing else
 changes.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/page-views-details-dark.png">
+  <img alt="Time on page spread over six duration bands, above the top referrers and the top countries, with countries under five views folded into one line." src=".github/assets/page-views-details-light.png">
+</picture>
 
 ## Exporting to CSV
 
