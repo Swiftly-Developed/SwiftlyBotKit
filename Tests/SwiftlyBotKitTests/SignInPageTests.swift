@@ -42,7 +42,7 @@ final class SignInPageTests: XCTestCase {
         XCTAssertTrue(custom.contains("<img src=\"/images/acme.png\" alt=\"Acme\">"))
         XCTAssertFalse(custom.contains("botkit-logo"))
         let untitled = page(.init(logo: .image(url: "/images/acme.png")))
-        XCTAssertTrue(untitled.contains("alt=\"AI bot traffic\""), "alt falls back to the title")
+        XCTAssertTrue(untitled.contains("alt=\"Analytics\""), "alt falls back to the title")
         let none = page(.init(logo: .none))
         XCTAssertFalse(none.contains("class=\"brand\""))
     }

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-27
+
+### Changed
+
+- The dashboard's default title is now **Analytics**, not "AI bot traffic",
+  since it shows people's page views and time on page as well as AI agents.
+  It is the heading, the browser tab title and the sign-in logo's fallback
+  alt text. To keep the old title, set `dashboard.title = "AI bot traffic"`.
+
 ## [0.10.0] - 2026-09-27
 
 ### Added
@@ -370,7 +379,8 @@ Initial public release.
   agents.
 - `Scripts/generate-ai-agent-catalog.py` to regenerate the catalog.
 
-[Unreleased]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.10.0...HEAD
+[Unreleased]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.11.0...HEAD
+[0.11.0]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.10.0...0.11.0
 [0.10.0]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.9.2...0.10.0
 [0.9.2]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.9.1...0.9.2
 [0.9.1]: https://github.com/Swiftly-Developed/SwiftlyBotKit/compare/0.9.0...0.9.1

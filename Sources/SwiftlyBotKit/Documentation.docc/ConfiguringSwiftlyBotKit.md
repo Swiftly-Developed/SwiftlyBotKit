@@ -186,7 +186,7 @@ config.clientIP = .forwardedFor(trustedProxies: 2)
 | ``BotKitConfiguration/Dashboard/path`` | `/admin/ai-bots` | Mount point; `login` and `logout` sit below it |
 | ``BotKitConfiguration/Dashboard/username`` | `.environment("BOT_DASHBOARD_USER")` | Sign-in username |
 | ``BotKitConfiguration/Dashboard/password`` | `.environment("BOT_DASHBOARD_PASSWORD")` | Sign-in password |
-| ``BotKitConfiguration/Dashboard/title`` | `AI bot traffic` | Heading and page title |
+| ``BotKitConfiguration/Dashboard/title`` | `Analytics` | Heading and page title |
 | ``BotKitConfiguration/Dashboard/timeZone`` | ``BotKitTimeZone/utc`` | Where hourly and daily bucket boundaries fall when the viewer's browser reports no zone |
 | ``BotKitConfiguration/Dashboard/dateRanges`` | every ``BotDateRange`` | Filter pills, in order |
 | ``BotKitConfiguration/Dashboard/defaultDateRange`` | ``BotDateRange/week`` | Range shown when the URL names none |

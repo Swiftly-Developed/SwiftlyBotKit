@@ -408,7 +408,7 @@ is not installed.
 | `path` | `/admin/ai-bots` | Mount point. Sign-in and sign-out sit below it. |
 | `username` | `.environment("BOT_DASHBOARD_USER")` | Sign-in username. |
 | `password` | `.environment("BOT_DASHBOARD_PASSWORD")` | Sign-in password. |
-| `title` | `AI bot traffic` | Heading and page title. |
+| `title` | `Analytics` | Heading and page title. |
 | `timeZone` | `.utc` | Zone buckets are drawn in when the viewer's browser does not report one (JavaScript off, or a zone this host does not know). A `BotKitTimeZone` case per canonical IANA zone, such as `.americaNewYork`. |
 | `dateRanges` | all `BotDateRange` cases | Range pills offered: `.day` (24h), `.week` (7d), `.month` (30d), `.quarter` (90d). |
 | `defaultDateRange` | `.week` | Range shown when the URL names none. |

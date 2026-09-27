@@ -73,7 +73,7 @@ final class ConfigurationDefaultsTests: XCTestCase {
         XCTAssertEqual(dashboard.normalizedPath, "/admin/ai-bots")
         XCTAssertEqual(dashboard.username, .environment("BOT_DASHBOARD_USER"))
         XCTAssertEqual(dashboard.password, .environment("BOT_DASHBOARD_PASSWORD"))
-        XCTAssertEqual(dashboard.title, "AI bot traffic")
+        XCTAssertEqual(dashboard.title, "Analytics")
         XCTAssertEqual(dashboard.timeZone, .utc)
         XCTAssertEqual(dashboard.timeZone.identifier, "UTC")
         XCTAssertEqual(dashboard.dateRanges, BotDateRange.allCases)
@@ -342,7 +342,7 @@ final class DashboardConfigurationTests: XCTestCase {
             knownAgentCount: 3
         )
         XCTAssertTrue(html.contains("Crawler watch"))
-        XCTAssertFalse(html.contains("AI bot traffic"))
+        XCTAssertFalse(html.contains(">Analytics<"))
         XCTAssertTrue(html.contains("action=\"/internal/bots/logout\""))
         XCTAssertTrue(html.contains("/internal/bots/?site=all&amp;range=24h"))
         XCTAssertFalse(html.contains("range=30d"))

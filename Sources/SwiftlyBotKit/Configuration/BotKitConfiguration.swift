@@ -675,7 +675,7 @@ extension BotKitConfiguration {
         /// `.environment("BOT_DASHBOARD_PASSWORD")`.
         public var password: BotKitConfigValue?
 
-        /// The heading and page title. Default `AI bot traffic`.
+        /// The heading and page title. Default `Analytics`.
         public var title: String
 
         /// The time zone every hourly and daily bucket boundary is drawn in,
@@ -720,7 +720,7 @@ extension BotKitConfiguration {
             path: String = "/admin/ai-bots",
             username: BotKitConfigValue? = .environment("BOT_DASHBOARD_USER"),
             password: BotKitConfigValue? = .environment("BOT_DASHBOARD_PASSWORD"),
-            title: String = "AI bot traffic",
+            title: String = "Analytics",
             timeZone: BotKitTimeZone = .utc,
             dateRanges: [BotDateRange] = BotDateRange.allCases,
             defaultDateRange: BotDateRange = .week,
