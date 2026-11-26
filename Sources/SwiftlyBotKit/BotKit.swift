@@ -142,8 +142,15 @@ public enum BotKit {
         )
 
         if config.recording.isEnabled {
+            let recordingDatabaseID = config.database
             let recorder = BotTrafficRecorder(
-                database: app.db(config.database),
+                database: { [weak app] in
+                    // `app.db` traps for an unregistered ID; check first.
+                    guard let app else { return nil }
+                    let registered = app.databases.ids()
+                    guard recordingDatabaseID.map({ registered.contains($0) }) ?? !registered.isEmpty else { return nil }
+                    return app.db(recordingDatabaseID)
+                },
                 classifier: runtime.classifier,
                 directory: runtime.directory,
                 signer: runtime.signer,
