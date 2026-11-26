@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Reverting `CreateAIBotVisit` no longer fails when its table or enum types
+  are already gone, as they are when `prepare` found an existing table and
+  recorded the migration without creating anything. The revert now drops with
+  `IF EXISTS` and removes the two enums' rows from `_fluent_enums`.
+
 ## [0.11.0] - 2026-09-27
 
 ### Changed

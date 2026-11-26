@@ -32,11 +32,29 @@ struct CreateAIBotVisit: AsyncMigration {
         }
     }
 
+    /// Idempotent, because `prepare` can record the migration without creating
+    /// anything (the existing-table branch above): Fluent's `schema().delete()`
+    /// and `enum().delete()` fail on an object that is already gone. One
+    /// statement per `raw(...)`, since PostgreSQL refuses several in one
+    /// prepared statement. No `CASCADE`: a view or foreign key an app built on
+    /// the table makes the revert fail rather than silently disappear.
     func revert(on database: Database) async throws {
         try await database.transaction { database in
-            try await database.schema("ai_bot_visits").delete()
-            try await database.enum("bot_verification").delete()
-            try await database.enum("ai_agent_purpose").delete()
+            guard let sql = database as? SQLDatabase else {
+                try await database.schema("ai_bot_visits").delete()
+                try await database.enum("bot_verification").delete()
+                try await database.enum("ai_agent_purpose").delete()
+                return
+            }
+            try await sql.raw("DROP TABLE IF EXISTS ai_bot_visits").run()
+            try await sql.raw("DROP TYPE IF EXISTS bot_verification").run()
+            try await sql.raw("DROP TYPE IF EXISTS ai_agent_purpose").run()
+            // Fluent keeps the cases of every enum it created in `_fluent_enums`.
+            let tracked = try await sql.raw("SELECT to_regclass('_fluent_enums') IS NOT NULL AS present")
+                .first()?.decode(column: "present", as: Bool.self) ?? false
+            if tracked {
+                try await sql.raw("DELETE FROM _fluent_enums WHERE name IN ('bot_verification', 'ai_agent_purpose')").run()
+            }
         }
     }
 
