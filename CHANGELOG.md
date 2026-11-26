@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Reverting `CreateAIBotVisit` no longer fails when its table or enum types
+  are already gone, as they are when `prepare` found an existing table and
+  recorded the migration without creating anything. The revert now drops with
+  `IF EXISTS` and removes the two enums' rows from `_fluent_enums`.
+- AI bot visits are written to the database registered under the configured
+  ID at the time of the write, not the one registered when
+  `configureRoutes(for:config:)` ran. An app, or a test harness, that points
+  that ID at another database after installing lost every row ("Could not
+  record AI bot visit: shutdown"). Page view counts already worked this way.
+
 ## [0.11.0] - 2026-09-27
 
 ### Changed

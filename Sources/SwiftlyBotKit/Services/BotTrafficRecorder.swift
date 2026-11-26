@@ -128,12 +128,41 @@ struct BotRequestClassifier: Sendable {
 /// analytics. The trade is that a process killed mid-write loses a row or two,
 /// which for traffic statistics is a fine trade.
 struct BotTrafficRecorder: Sendable {
-    let database: any Database
+    /// Resolved on every write, never at install: an app (or its test
+    /// harness) may point its database ID at another database after
+    /// `configureRoutes` ran, and a handle captured then would keep writing
+    /// to the old one, or to a driver that has shut down. `nil` drops the row.
+    let database: @Sendable () -> (any Database)?
     let classifier: BotRequestClassifier
     /// `nil` when verification is turned off: every agent is `.unverified`.
     let directory: CrawlerIPDirectory?
     let signer: BotSigner
     let logger: Logger
+
+    init(
+        database: @escaping @Sendable () -> (any Database)?,
+        classifier: BotRequestClassifier,
+        directory: CrawlerIPDirectory?,
+        signer: BotSigner,
+        logger: Logger
+    ) {
+        self.database = database
+        self.classifier = classifier
+        self.directory = directory
+        self.signer = signer
+        self.logger = logger
+    }
+
+    /// A recorder bound to one fixed database.
+    init(
+        database: any Database,
+        classifier: BotRequestClassifier,
+        directory: CrawlerIPDirectory?,
+        signer: BotSigner,
+        logger: Logger
+    ) {
+        self.init(database: { database }, classifier: classifier, directory: directory, signer: signer, logger: logger)
+    }
 
     func record(_ candidate: BotVisitCandidate) async {
         let siteKey = Self.storable(candidate.siteKey)
@@ -173,6 +202,10 @@ struct BotTrafficRecorder: Sendable {
             return
         }
 
+        guard let database = database() else {
+            logger.warning("Could not record AI bot visit: its database is not registered.")
+            return
+        }
         do {
             try await visit.save(on: database)
         } catch {

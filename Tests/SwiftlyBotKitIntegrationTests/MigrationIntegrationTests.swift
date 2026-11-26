@@ -210,6 +210,24 @@ final class MigrationIntegrationTests: PostgresIntegrationTestCase {
         XCTAssertEqual(data.totals.botVisits, 1)
     }
 
+    /// The table and enum types are already gone (the migration was recorded
+    /// over an existing table that was later dropped by hand). Revert still
+    /// succeeds and clears Fluent's enum metadata.
+    func testRevertWhenTheObjectsAreAlreadyGone() async throws {
+        BotKit.configure(for: app)
+        try await app.autoMigrate()
+        try await sql().raw("DROP TABLE ai_bot_visits").run()
+        try await sql().raw("DROP TYPE bot_verification").run()
+        try await sql().raw("DROP TYPE ai_agent_purpose").run()
+
+        try await app.autoRevert()
+
+        let remaining = try await sql().raw(
+            "SELECT count(*) AS n FROM _fluent_enums WHERE name IN ('bot_verification', 'ai_agent_purpose')"
+        ).first()?.decode(column: "n", as: Int.self)
+        XCTAssertEqual(remaining, 0)
+    }
+
     /// An app table that uses BotKit's enum type (a view or report the owner
     /// built). Revert then fails on the dependency; reported.
     func testRevertWithADependentObject() async throws {
